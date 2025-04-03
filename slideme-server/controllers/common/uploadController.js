@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import logger from "../../config/logger.js";
 import con from '../../config/db.js';
-import { formatSuccessResponse, formatErrorResponse } from "../utils/formatters/responseFormatter.js";
+import { formatSuccessResponse, formatErrorResponse } from "../../utils/formatters/responseFormatter.js";
 
 const uploadsDir = path.resolve("uploads");
 

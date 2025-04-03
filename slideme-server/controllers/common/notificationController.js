@@ -1,8 +1,8 @@
 /**
  * Notification controller for managing app notifications
  */
-import con from "../config/db.js";
-import logger from "../config/logger.js";
+import con from "../../config/db.js";
+import logger from "../../config/logger.js";
 
 /**
  * Get all notifications

@@ -1,7 +1,7 @@
-import con from "../config/db.js";
+import con from "../../config/db.js";
 import logger from "../../config/logger.js";
 import { formatSuccessResponse, formatErrorResponse } from "../../utils/formatters/responseFormatter.js";
-import { validatePaymentMethod } from "../utils/validators/paymentValidator.js";
+import { validatePaymentMethod } from "../../utils/validators/paymentValidator.js";
 
 /**
  * Add payment method

@@ -73,7 +73,7 @@ const upload = multer({
 /**
  * Handle multer errors
  */
-export const handleUploadErrors = (err, req, res, next) => {
+const handleUploadErrors = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     logger.error('Multer error', { error: err.message });
     
@@ -97,7 +97,7 @@ export const handleUploadErrors = (err, req, res, next) => {
  * Set upload subdirectory
  * @param {string} subDir - Subdirectory name
  */
-export const setUploadSubDir = (subDir) => {
+const setUploadSubDir = (subDir) => {
   return (req, res, next) => {
     req.uploadSubDir = subDir;
     next();

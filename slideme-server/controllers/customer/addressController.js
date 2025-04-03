@@ -1,4 +1,4 @@
-import con from "../config/db.js";
+import con from "../../config/db.js";
 import logger from "../../config/logger.js";
 import { formatSuccessResponse, formatErrorResponse } from "../../utils/formatters/responseFormatter.js";
 import { validateAddress, validateBookmark } from "../../utils/validators/addressValidator.js";

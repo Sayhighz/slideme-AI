@@ -54,6 +54,9 @@ export const verifyToken = (req, res, next) => {
   }
 };
 
+// Add alias for backward compatibility
+export const validateAuthToken = verifyToken;
+
 /**
  * Check if user has required role
  * @param {Array|string} roles - Allowed roles
@@ -94,5 +97,6 @@ export const hasRole = (roles) => {
 
 export default {
   verifyToken,
+  validateAuthToken,  // Also add to default export
   hasRole
 };

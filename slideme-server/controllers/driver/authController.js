@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
 import con from "../../config/db.js";
 import logger from "../../config/logger.js";
 import { validatePhoneNumber } from "../../utils/validators/userValidator.js";

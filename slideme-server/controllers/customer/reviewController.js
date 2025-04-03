@@ -1,8 +1,7 @@
-import con from '../config/db.js';
-import logger from '../config/logger.js';
+import con from '../../config/db.js';
+import logger from '../../config/logger.js';
 import { STATUS_CODES } from '../../utils/constants/statusCodes.js';
 import { formatSuccessResponse, formatErrorResponse } from '../../utils/formatters/responseFormatter.js';
-import { DatabaseError } from '../utils/errors/customErrors.js';
 
 /**
  * Add a new review

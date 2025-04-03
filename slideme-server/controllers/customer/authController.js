@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import con from "../config/db.js";
+import con from "../../config/db.js";
 import logger from "../../config/logger.js";
 import { formatSuccessResponse, formatErrorResponse } from "../../utils/formatters/responseFormatter.js";
 import { ERROR_MESSAGES } from "../../utils/errors/errorMessages.js";
@@ -11,6 +11,7 @@ import { ERROR_MESSAGES } from "../../utils/errors/errorMessages.js";
  */
 export const loginCustomer = (req, res) => {
   const { phone_number } = req.body;
+  console.log(req.body);
 
   if (!phone_number) {
     return res.status(400).json(formatErrorResponse("Please provide phone number"));
