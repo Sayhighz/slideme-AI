@@ -1,112 +1,512 @@
+/**
+ * Common upload controller
+ * Handles file uploads across the application
+ */
 import path from 'path';
-import fs from 'fs';
-import logger from "../../config/logger.js";
-import con from '../../config/db.js';
-import { formatSuccessResponse, formatErrorResponse } from "../../utils/formatters/responseFormatter.js";
-
-const uploadsDir = path.resolve("uploads");
+import logger from '../../config/logger.js';
+import { ValidationError, NotFoundError, CustomError } from '../../utils/errors/customErrors.js';
+import { STATUS_CODES } from '../../utils/constants/statusCodes.js';
+import { ERROR_MESSAGES } from '../../utils/errors/errorMessages.js';
+import { formatSuccessResponse, formatErrorResponse } from '../../utils/formatters/responseFormatter.js';
+import { asyncHandler } from '../../utils/errors/errorHandler.js';
+import fileService from '../../services/storage/fileService.js';
+import imageService from '../../services/storage/imageService.js';
 
 /**
- * Fetch image from server
+ * Fetch image
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const fetchImage = (req, res) => {
-  const { filename } = req.query;
+export const fetchImage = asyncHandler(async (req, res) => {
+  const { filename, subdir } = req.query;
 
   if (!filename) {
-    return res.status(400).json(formatErrorResponse("Filename is required"));
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['filename']);
   }
 
-  const filePath = path.join(uploadsDir, filename);
+  try {
+    const file = await fileService.getFile(filename, subdir || '');
 
-  fs.access(filePath, fs.constants.F_OK, (err) => {
-    if (err) {
-      logger.warn('File not found', { filename });
-      return res.status(404).json(formatErrorResponse("File not found"));
+    if (!file) {
+      throw new NotFoundError('ไม่พบไฟล์ที่ต้องการ');
     }
-    res.sendFile(filePath);
-  });
-};
+
+    // Set proper content type
+    res.set('Content-Type', file.mimetype);
+    
+    // Set cache control for images
+    if (file.mimetype.startsWith('image/')) {
+      res.set('Cache-Control', 'public, max-age=86400'); // 1 day
+    } else {
+      res.set('Cache-Control', 'public, max-age=3600'); // 1 hour
+    }
+    
+    // Set content disposition
+    res.set('Content-Disposition', 'inline');
+
+    return res.status(STATUS_CODES.OK).send(file.content);
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
+    
+    logger.error('Error retrieving image', { 
+      filename, 
+      subdir, 
+      error: error.message 
+    });
+    
+    throw new CustomError('เกิดข้อผิดพลาดในการดึงรูปภาพ', STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
 
 /**
- * Upload photos before service
+ * Upload before service photo
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const uploadBeforeService = (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json(formatErrorResponse("No files uploaded"));
+export const uploadBeforeService = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, ['กรุณาเลือกไฟล์ที่ต้องการอัพโหลด']);
   }
 
   const { request_id, driver_id } = req.body;
 
   if (!request_id || !driver_id) {
-    return res.status(400).json(formatErrorResponse("request_id and driver_id are required"));
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
   }
 
-  const photoPaths = req.files.map((file) => file.path);
-  const photoPathsJSON = JSON.stringify(photoPaths);
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.INVALID_TYPE, 
+      ['ประเภทไฟล์ไม่ถูกต้อง ต้องเป็น jpg, png หรือ webp เท่านั้น']);
+  }
 
-  const sql = `
-    INSERT INTO driverlogs (
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (req.file.size > maxSize) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.TOO_LARGE, 
+      ['ไฟล์มีขนาดใหญ่เกินไป ต้องไม่เกิน 5MB']);
+  }
+
+  try {
+    const db = (await import('../../config/db.js')).default;
+    
+    // Process and optimize the image
+    const subdir = `services/${request_id}`;
+    const savedFile = await imageService.processAndSaveImage(req.file, {
+      width: 1200,
+      quality: 85,
+      subdir
+    });
+
+    if (!savedFile) {
+      throw new Error('Failed to save file');
+    }
+
+    // Check if log exists
+    const logExists = await db.query(
+      'SELECT log_id FROM driverlogs WHERE request_id = ? AND driver_id = ?',
+      [request_id, driver_id]
+    );
+    
+    if (logExists.length === 0) {
+      // Create new log
+      await db.query(
+        `INSERT INTO driverlogs (request_id, driver_id, photo_before_service, created_at) 
+         VALUES (?, ?, ?, NOW())`,
+        [request_id, driver_id, savedFile.filename]
+      );
+    } else {
+      // Update existing log
+      await db.query(
+        `UPDATE driverlogs SET photo_before_service = ? WHERE request_id = ? AND driver_id = ?`,
+        [savedFile.filename, request_id, driver_id]
+      );
+    }
+
+    logger.info('Before service photo uploaded successfully', { 
       request_id,
       driver_id,
-      photo_before_service
-    ) VALUES (?, ?, ?)
-  `;
+      savedAs: savedFile.filename
+    });
 
-  con.query(sql, [request_id, driver_id, photoPathsJSON], (err, result) => {
-    if (err) {
-      logger.error('Error uploading before service photos', { error: err.message });
-      return res.status(500).json(formatErrorResponse(err.message));
-    }
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      request_id,
+      driver_id,
+      photo_type: 'before',
+      file: {
+        filename: savedFile.filename,
+        url: savedFile.url
+      }
+    }, 'อัปโหลดรูปภาพก่อนให้บริการสำเร็จ'));
+  } catch (error) {
+    logger.error('Error uploading before service photo', { 
+      request_id,
+      driver_id,
+      originalName: req.file?.originalname, 
+      error: error.message 
+    });
     
-    res.json(formatSuccessResponse({
-      InsertId: result.insertId, 
-      FilePaths: photoPaths
-    }, "Photos uploaded successfully"));
-  });
-};
+    throw new CustomError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
 
 /**
- * Upload photos after service
+ * Upload after service photo
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const uploadAfterService = (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json(formatErrorResponse("No files uploaded"));
+export const uploadAfterService = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, ['กรุณาเลือกไฟล์ที่ต้องการอัพโหลด']);
   }
 
   const { request_id, driver_id } = req.body;
 
   if (!request_id || !driver_id) {
-    return res.status(400).json(formatErrorResponse("request_id and driver_id are required"));
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
   }
 
-  const photoPaths = req.files.map((file) => file.path);
-  const photoPathsJSON = JSON.stringify(photoPaths);
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.INVALID_TYPE, 
+      ['ประเภทไฟล์ไม่ถูกต้อง ต้องเป็น jpg, png หรือ webp เท่านั้น']);
+  }
 
-  const sql = `
-    UPDATE driverlogs 
-    SET photo_after_service = ?
-    WHERE request_id = ? AND driver_id = ?
-  `;
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (req.file.size > maxSize) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.TOO_LARGE, 
+      ['ไฟล์มีขนาดใหญ่เกินไป ต้องไม่เกิน 5MB']);
+  }
 
-  con.query(sql, [photoPathsJSON, request_id, driver_id], (err, result) => {
-    if (err) {
-      logger.error('Error uploading after service photos', { error: err.message });
-      return res.status(500).json(formatErrorResponse(err.message));
+  try {
+    const db = (await import('../../config/db.js')).default;
+    
+    // Process and optimize the image
+    const subdir = `services/${request_id}`;
+    const savedFile = await imageService.processAndSaveImage(req.file, {
+      width: 1200,
+      quality: 85,
+      subdir
+    });
+
+    if (!savedFile) {
+      throw new Error('Failed to save file');
+    }
+
+    // Check if log exists
+    const logExists = await db.query(
+      'SELECT log_id FROM driverlogs WHERE request_id = ? AND driver_id = ?',
+      [request_id, driver_id]
+    );
+    
+    if (logExists.length === 0) {
+      // Create new log
+      await db.query(
+        `INSERT INTO driverlogs (request_id, driver_id, photo_after_service, created_at) 
+         VALUES (?, ?, ?, NOW())`,
+        [request_id, driver_id, savedFile.filename]
+      );
+    } else {
+      // Update existing log
+      await db.query(
+        `UPDATE driverlogs SET photo_after_service = ? WHERE request_id = ? AND driver_id = ?`,
+        [savedFile.filename, request_id, driver_id]
+      );
+    }
+
+    logger.info('After service photo uploaded successfully', { 
+      request_id,
+      driver_id,
+      savedAs: savedFile.filename
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      request_id,
+      driver_id,
+      photo_type: 'after',
+      file: {
+        filename: savedFile.filename,
+        url: savedFile.url
+      }
+    }, 'อัปโหลดรูปภาพหลังให้บริการสำเร็จ'));
+  } catch (error) {
+    logger.error('Error uploading after service photo', { 
+      request_id,
+      driver_id,
+      originalName: req.file?.originalname, 
+      error: error.message 
+    });
+    
+    throw new CustomError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
+/**
+ * Upload image file
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const uploadImage = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, ['กรุณาเลือกไฟล์ที่ต้องการอัพโหลด']);
+  }
+
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.INVALID_TYPE, 
+      ['ประเภทไฟล์ไม่ถูกต้อง ต้องเป็น jpg, png, gif หรือ webp เท่านั้น']);
+  }
+
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (req.file.size > maxSize) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.TOO_LARGE, 
+      ['ไฟล์มีขนาดใหญ่เกินไป ต้องไม่เกิน 5MB']);
+  }
+
+  try {
+    // Get upload directory from query params or use default
+    const subdir = req.query.type || 'images';
+    
+    // Resize and optimize image if requested
+    let processedFile;
+    
+    if (req.query.resize === 'true') {
+      // Resize options
+      const width = parseInt(req.query.width) || 800;
+      const height = parseInt(req.query.height) || null;
+      const quality = parseInt(req.query.quality) || 80;
+      
+      // Process image
+      processedFile = await imageService.processAndSaveImage(req.file, {
+        width,
+        height,
+        quality,
+        format: req.query.format,  // can be jpeg, png, webp
+        subdir
+      });
+    } else {
+      // Save original file
+      processedFile = await fileService.saveFile(req.file, subdir);
+    }
+
+    if (!processedFile) {
+      throw new Error('Failed to save file');
+    }
+
+    logger.info('File uploaded successfully', { 
+      originalName: req.file.originalname,
+      savedAs: processedFile.filename,
+      size: processedFile.size,
+      type: processedFile.mimetype
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      file: {
+        filename: processedFile.filename,
+        originalname: processedFile.originalname,
+        size: processedFile.size,
+        mimetype: processedFile.mimetype,
+        url: processedFile.url
+      }
+    }, 'อัปโหลดไฟล์สำเร็จ'));
+  } catch (error) {
+    logger.error('Error uploading image', { 
+      originalName: req.file?.originalname, 
+      error: error.message 
+    });
+    
+    throw new CustomError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
+/**
+ * Upload document file
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const uploadDocument = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, ['กรุณาเลือกไฟล์ที่ต้องการอัพโหลด']);
+  }
+
+  // Validate file type
+  const allowedTypes = [
+    'application/pdf', 
+    'application/msword', 
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain'
+  ];
+  
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.INVALID_TYPE, 
+      ['ประเภทไฟล์ไม่ถูกต้อง ต้องเป็น pdf, doc, docx, xls, xlsx หรือ txt เท่านั้น']);
+  }
+
+  // Validate file size (max 10MB)
+  const maxSize = 10 * 1024 * 1024; // 10MB
+  if (req.file.size > maxSize) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.TOO_LARGE, 
+      ['ไฟล์มีขนาดใหญ่เกินไป ต้องไม่เกิน 10MB']);
+  }
+
+  try {
+    // Save file to documents directory
+    const savedFile = await fileService.saveFile(req.file, 'documents');
+
+    if (!savedFile) {
+      throw new Error('Failed to save file');
+    }
+
+    logger.info('Document uploaded successfully', { 
+      originalName: req.file.originalname,
+      savedAs: savedFile.filename,
+      size: savedFile.size
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      file: {
+        filename: savedFile.filename,
+        originalname: savedFile.originalname,
+        size: savedFile.size,
+        mimetype: savedFile.mimetype,
+        url: savedFile.url
+      }
+    }, 'อัปโหลดเอกสารสำเร็จ'));
+  } catch (error) {
+    logger.error('Error uploading document', { 
+      originalName: req.file?.originalname, 
+      error: error.message 
+    });
+    
+    throw new CustomError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
+/**
+ * Upload driver profile photo
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const uploadDriverProfilePhoto = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, ['กรุณาเลือกไฟล์ที่ต้องการอัพโหลด']);
+  }
+
+  const { driver_id } = req.body;
+
+  if (!driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
+  }
+
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.INVALID_TYPE, 
+      ['ประเภทไฟล์ไม่ถูกต้อง ต้องเป็น jpg, png หรือ webp เท่านั้น']);
+  }
+
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (req.file.size > maxSize) {
+    throw new ValidationError(ERROR_MESSAGES.FILE_UPLOAD.TOO_LARGE, 
+      ['ไฟล์มีขนาดใหญ่เกินไป ต้องไม่เกิน 5MB']);
+  }
+
+  try {
+    // Process and optimize the image
+    const subdir = `drivers/${driver_id}/profile`;
+    const savedFile = await imageService.processAndSaveImage(req.file, {
+      width: 500, // profile photo can be smaller
+      quality: 85,
+      subdir
+    });
+
+    if (!savedFile) {
+      throw new Error('Failed to save file');
+    }
+
+    // Here you could update the driver profile in the database with the profile photo path
+    // const db = (await import('../../config/db.js')).default;
+    // await db.query('UPDATE drivers SET profile_photo = ? WHERE driver_id = ?', [savedFile.filename, driver_id]);
+
+    logger.info('Driver profile photo uploaded successfully', { 
+      driver_id,
+      savedAs: savedFile.filename
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      driver_id,
+      file: {
+        filename: savedFile.filename,
+        url: savedFile.url
+      }
+    }, 'อัปโหลดรูปโปรไฟล์สำเร็จ'));
+  } catch (error) {
+    logger.error('Error uploading driver profile photo', { 
+      driver_id,
+      originalName: req.file?.originalname, 
+      error: error.message 
+    });
+    
+    throw new CustomError(ERROR_MESSAGES.FILE_UPLOAD.UPLOAD_FAILED, STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
+/**
+ * Delete file
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const deleteFile = asyncHandler(async (req, res) => {
+  const { filename, subdir } = req.body;
+
+  if (!filename) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['filename']);
+  }
+
+  try {
+    const result = await fileService.deleteFile(filename, subdir || '');
+
+    if (!result) {
+      throw new NotFoundError('ไม่พบไฟล์ที่ต้องการลบ');
+    }
+
+    logger.info('File deleted successfully', { 
+      filename, 
+      subdir 
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse(null, 'ลบไฟล์สำเร็จ'));
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
     }
     
-    if (result.affectedRows === 0) {
-      return res.status(404).json(formatErrorResponse("No matching record found to update"));
-    }
+    logger.error('Error deleting file', { 
+      filename, 
+      subdir, 
+      error: error.message 
+    });
     
-    res.json(formatSuccessResponse({
-      AffectedRows: result.affectedRows, 
-      FilePaths: photoPaths
-    }, "Photos uploaded successfully"));
-  });
+    throw new CustomError('เกิดข้อผิดพลาดในการลบไฟล์', STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
+export default {
+  fetchImage,
+  uploadBeforeService,
+  uploadAfterService,
+  uploadImage,
+  uploadDocument,
+  uploadDriverProfilePhoto,
+  deleteFile
 };

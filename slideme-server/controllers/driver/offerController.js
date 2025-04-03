@@ -4,8 +4,12 @@
  */
 import db from '../../config/db.js';
 import logger from '../../config/logger.js';
-import { DatabaseError } from '../../utils/errors/customErrors.js';
+import { DatabaseError, ValidationError, NotFoundError, ForbiddenError } from '../../utils/errors/customErrors.js';
+import { STATUS_CODES } from '../../utils/constants/statusCodes.js';
+import { ERROR_MESSAGES } from '../../utils/errors/errorMessages.js';
+import { formatSuccessResponse, formatErrorResponse } from '../../utils/formatters/responseFormatter.js';
 import { validateOfferCreation } from '../../utils/validators/requestValidator.js';
+import { OFFER_STATUS, REQUEST_STATUS } from '../../utils/constants/requestStatus.js';
 import socketService from '../../services/communication/socketService.js';
 
 /**
@@ -20,10 +24,7 @@ export const createOffer = async (req, res) => {
     // Validate offer data
     const validation = validateOfferCreation(req.body);
     if (!validation.isValid) {
-      return res.status(400).json({
-        Status: false,
-        Error: validation.errors.join(', ')
-      });
+      throw new ValidationError(validation.errors.join(', '));
     }
 
     // Check if driver is approved
@@ -33,17 +34,11 @@ export const createOffer = async (req, res) => {
     );
 
     if (driverStatus.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อมูลคนขับ"
-      });
+      throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
     }
 
     if (driverStatus[0].approval_status !== 'approved') {
-      return res.status(403).json({
-        Status: false,
-        Error: "คนขับยังไม่ได้รับการอนุมัติ"
-      });
+      throw new ForbiddenError(ERROR_MESSAGES.AUTH.ACCOUNT_NOT_APPROVED);
     }
 
     // Check if request exists and is pending
@@ -53,17 +48,11 @@ export const createOffer = async (req, res) => {
     );
 
     if (requestStatus.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบคำขอบริการ"
-      });
+      throw new NotFoundError("ไม่พบคำขอบริการ");
     }
 
-    if (requestStatus[0].status !== 'pending') {
-      return res.status(400).json({
-        Status: false,
-        Error: "คำขอบริการนี้ไม่อยู่ในสถานะที่สามารถรับข้อเสนอได้"
-      });
+    if (requestStatus[0].status !== REQUEST_STATUS.PENDING) {
+      throw new ValidationError("คำขอบริการนี้ไม่อยู่ในสถานะที่สามารถรับข้อเสนอได้");
     }
 
     // Check if driver already made an offer for this request
@@ -73,33 +62,31 @@ export const createOffer = async (req, res) => {
     );
 
     if (existingOffer.length > 0) {
-      // If offer exists but was rejected, allow creating a new one
-      if (existingOffer[0].offer_status === 'rejected') {
-        // Update existing offer
-        await db.query(
-          "UPDATE driveroffers SET offered_price = ?, offer_status = 'pending', created_at = NOW() WHERE offer_id = ?",
-          [offered_price, existingOffer[0].offer_id]
-        );
-
-        logger.info('Driver updated rejected offer', {
-          driver_id,
-          request_id,
-          offer_id: existingOffer[0].offer_id,
-          price: offered_price
-        });
-
-        return res.status(200).json({
-          Status: true,
-          Message: "อัปเดตข้อเสนอเรียบร้อย",
-          offer_id: existingOffer[0].offer_id
-        });
+        // If offer exists but was rejected, allow creating a new one
+        if (existingOffer[0].offer_status === OFFER_STATUS.REJECTED) {
+          // Update existing offer
+          await db.query(
+            "UPDATE driveroffers SET offered_price = ?, offer_status = 'pending', created_at = NOW() WHERE offer_id = ?",
+            [offered_price, existingOffer[0].offer_id]
+          );
+      
+          logger.info('Driver updated rejected offer', {
+            driver_id,
+            request_id,
+            offer_id: existingOffer[0].offer_id,
+            price: offered_price
+          });
+      
+          return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+            offer_id: existingOffer[0].offer_id
+          }, "อัปเดตข้อเสนอเรียบร้อย"));
+        }
+      
+        // ใช้ ValidationError แทน ConflictError
+        throw new ValidationError("คุณได้เสนอราคาสำหรับคำขอบริการนี้ไปแล้ว");
       }
-
-      return res.status(409).json({
-        Status: false,
-        Error: "คุณได้เสนอราคาสำหรับคำขอบริการนี้ไปแล้ว"
-      });
-    }
+      
+    
 
     // Insert new offer
     const result = await db.query(
@@ -108,7 +95,7 @@ export const createOffer = async (req, res) => {
     );
 
     if (!result.insertId) {
-      throw new Error('Failed to create offer');
+      throw new DatabaseError('Failed to create offer');
     }
 
     // Get customer ID for notification
@@ -135,25 +122,31 @@ export const createOffer = async (req, res) => {
       price: offered_price
     });
 
-    return res.status(201).json({
-      Status: true,
-      Message: "เสนอราคาสำเร็จ",
+    return res.status(STATUS_CODES.CREATED).json(formatSuccessResponse({
       offer_id: result.insertId
-    });
+    }, "เสนอราคาสำเร็จ"));
   } catch (error) {
     logger.error('Error creating driver offer', { error: error.message });
     
-    if (error instanceof DatabaseError) {
-      return res.status(500).json({
-        Status: false,
-        Error: "เกิดข้อผิดพลาดในฐานข้อมูล"
-      });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
     }
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof ForbiddenError) {
+      return res.status(STATUS_CODES.FORBIDDEN).json(formatErrorResponse(error.message));
+    }
+    
+    // ลบการตรวจสอบ ConflictError
+    
+    if (error instanceof DatabaseError) {
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -167,10 +160,7 @@ export const getDriverOffers = async (req, res) => {
     const { driver_id } = req.query;
     
     if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
     }
 
     const sql = `
@@ -193,29 +183,29 @@ export const getDriverOffers = async (req, res) => {
       LEFT JOIN servicerequests s ON d.request_id = s.request_id
       LEFT JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
       WHERE d.driver_id = ?
-      AND d.offer_status != 'rejected'
-      AND s.status != 'completed'
-      AND s.status != 'cancelled'
+      AND d.offer_status != '${OFFER_STATUS.REJECTED}'
+      AND s.status != '${REQUEST_STATUS.COMPLETED}'
+      AND s.status != '${REQUEST_STATUS.CANCELLED}'
       ORDER BY d.created_at DESC
     `;
 
     const offers = await db.query(sql, [driver_id]);
 
-    return res.status(200).json({
-      Status: true,
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
       Count: offers.length,
       Result: offers
-    });
+    }));
   } catch (error) {
     logger.error('Error fetching driver offers', { 
       driver_id: req.query.driver_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -229,10 +219,7 @@ export const cancelOffer = async (req, res) => {
     const { offer_id, driver_id } = req.body;
     
     if (!offer_id || !driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ offer_id และ driver_id"
-      });
+      throw new ValidationError("กรุณาระบุ offer_id และ driver_id");
     }
 
     // Verify the offer belongs to this driver
@@ -242,32 +229,26 @@ export const cancelOffer = async (req, res) => {
     );
 
     if (offerCheck.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อเสนอ หรือข้อเสนอไม่ได้เป็นของคนขับนี้"
-      });
+      throw new NotFoundError("ไม่พบข้อเสนอ หรือข้อเสนอไม่ได้เป็นของคนขับนี้");
     }
 
     const offer = offerCheck[0];
 
     // Check if offer can be cancelled
-    if (offer.offer_status === 'accepted') {
-      if (offer.request_status === 'accepted') {
-        return res.status(400).json({
-          Status: false,
-          Error: "ไม่สามารถยกเลิกข้อเสนอที่ถูกยอมรับและกำลังดำเนินการแล้ว"
-        });
+    if (offer.offer_status === OFFER_STATUS.ACCEPTED) {
+      if (offer.request_status === REQUEST_STATUS.ACCEPTED) {
+        throw new ValidationError("ไม่สามารถยกเลิกข้อเสนอที่ถูกยอมรับและกำลังดำเนินการแล้ว");
       }
     }
 
     // Update offer status to rejected
     const result = await db.query(
-      "UPDATE driveroffers SET offer_status = 'rejected' WHERE offer_id = ?",
+      `UPDATE driveroffers SET offer_status = '${OFFER_STATUS.REJECTED}' WHERE offer_id = ?`,
       [offer_id]
     );
 
     if (result.affectedRows === 0) {
-      throw new Error('Failed to cancel offer');
+      throw new DatabaseError('Failed to cancel offer');
     }
 
     logger.info('Driver cancelled offer', {
@@ -275,20 +256,26 @@ export const cancelOffer = async (req, res) => {
       offer_id
     });
 
-    return res.status(200).json({
-      Status: true,
-      Message: "ยกเลิกข้อเสนอเรียบร้อย"
-    });
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse(null, "ยกเลิกข้อเสนอเรียบร้อย"));
   } catch (error) {
     logger.error('Error cancelling driver offer', { 
       offer_id: req.body.offer_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof DatabaseError) {
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -302,10 +289,7 @@ export const getOfferDetails = async (req, res) => {
     const { offer_id, driver_id } = req.query;
     
     if (!offer_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ offer_id"
-      });
+      throw new ValidationError("กรุณาระบุ offer_id");
     }
 
     let sql = `
@@ -346,26 +330,25 @@ export const getOfferDetails = async (req, res) => {
     const offers = await db.query(sql, params);
 
     if (offers.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อเสนอ"
-      });
+      throw new NotFoundError("ไม่พบข้อเสนอ");
     }
 
-    return res.status(200).json({
-      Status: true,
-      Result: offers[0]
-    });
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse(offers[0]));
   } catch (error) {
     logger.error('Error fetching offer details', { 
       offer_id: req.query.offer_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -379,15 +362,12 @@ export const rejectAllPendingOffers = async (req, res) => {
     const { driver_id } = req.body;
     
     if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
+      throw new ValidationError("กรุณาระบุ driver_id");
     }
 
     // Update all pending offers to rejected
     const result = await db.query(
-      "UPDATE driveroffers SET offer_status = 'rejected' WHERE driver_id = ? AND offer_status = 'pending'",
+      `UPDATE driveroffers SET offer_status = '${OFFER_STATUS.REJECTED}' WHERE driver_id = ? AND offer_status = '${OFFER_STATUS.PENDING}'`,
       [driver_id]
     );
 
@@ -396,21 +376,20 @@ export const rejectAllPendingOffers = async (req, res) => {
       affected_offers: result.affectedRows
     });
 
-    return res.status(200).json({
-      Status: true,
-      Message: "ยกเลิกข้อเสนอที่รอการตอบรับทั้งหมดเรียบร้อย",
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
       AffectedOffers: result.affectedRows
-    });
+    }, "ยกเลิกข้อเสนอที่รอการตอบรับทั้งหมดเรียบร้อย"));
   } catch (error) {
     logger.error('Error rejecting all pending offers', { 
       driver_id: req.body.driver_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -426,10 +405,7 @@ export const getOffersHistory = async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
     
     if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
+      throw new ValidationError("กรุณาระบุ driver_id");
     }
 
     const sql = `
@@ -452,8 +428,8 @@ export const getOffersHistory = async (req, res) => {
       JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
       LEFT JOIN reviews r ON r.request_id = s.request_id AND r.driver_id = d.driver_id
       WHERE d.driver_id = ?
-      AND d.offer_status = 'accepted'
-      AND s.status = 'completed'
+      AND d.offer_status = '${OFFER_STATUS.ACCEPTED}'
+      AND s.status = '${REQUEST_STATUS.COMPLETED}'
       ORDER BY s.request_time DESC
       LIMIT ? OFFSET ?
     `;
@@ -464,12 +440,11 @@ export const getOffersHistory = async (req, res) => {
     const countResult = await db.query(
       `SELECT COUNT(*) as total FROM driveroffers d
        JOIN servicerequests s ON d.request_id = s.request_id
-       WHERE d.driver_id = ? AND d.offer_status = 'accepted' AND s.status = 'completed'`,
+       WHERE d.driver_id = ? AND d.offer_status = '${OFFER_STATUS.ACCEPTED}' AND s.status = '${REQUEST_STATUS.COMPLETED}'`,
       [driver_id]
     );
 
-    return res.status(200).json({
-      Status: true,
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
       Count: offers.length,
       Total: countResult[0].total,
       Result: offers,
@@ -478,17 +453,18 @@ export const getOffersHistory = async (req, res) => {
         offset,
         totalPages: Math.ceil(countResult[0].total / limit)
       }
-    });
+    }));
   } catch (error) {
     logger.error('Error fetching offers history', { 
       driver_id: req.query.driver_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 

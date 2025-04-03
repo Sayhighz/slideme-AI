@@ -4,229 +4,309 @@
  */
 import db from '../../config/db.js';
 import logger from '../../config/logger.js';
-import { DatabaseError } from '../../utils/errors/customErrors.js';
+import { DatabaseError, NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors/customErrors.js';
+import { STATUS_CODES } from '../../utils/constants/statusCodes.js';
+import { ERROR_MESSAGES } from '../../utils/errors/errorMessages.js';
+import { formatSuccessResponse, formatErrorResponse, formatServiceRequest } from '../../utils/formatters/responseFormatter.js';
+import { REQUEST_STATUS, OFFER_STATUS } from '../../utils/constants/requestStatus.js';
+import { validateCreateRequest } from '../../utils/validators/requestValidator.js';
+import { asyncHandler } from '../../utils/errors/errorHandler.js';
 import distanceService from '../../services/location/distanceService.js';
 import mapService from '../../services/location/mapService.js';
 import socketService from '../../services/communication/socketService.js';
+import { maskString } from '../../utils/helpers/stringHelpers.js';
+import { formatDisplayDate, formatTimeString } from '../../utils/formatters/dateFormatter.js';
 
 /**
  * Get available service requests
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const getAvailableRequests = async (req, res) => {
-  try {
-    const { driver_id, vehicletype_id, latitude, longitude, radius } = req.query;
+export const getAvailableRequests = asyncHandler(async (req, res) => {
+  const { driver_id, vehicletype_id, latitude, longitude, radius } = req.query;
 
-    // Basic validation
-    if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
-    }
+  // Basic validation
+  if (!driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
+  }
 
-    // Check if driver is approved
-    const driverStatus = await db.query(
-      "SELECT approval_status, vehicletype_id FROM drivers WHERE driver_id = ?",
-      [driver_id]
-    );
+  // Check if driver is approved
+  const driverStatus = await db.query(
+    "SELECT approval_status, vehicletype_id FROM drivers WHERE driver_id = ?",
+    [driver_id]
+  );
 
-    if (driverStatus.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อมูลคนขับ"
-      });
-    }
+  if (driverStatus.length === 0) {
+    throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+  }
 
-    if (driverStatus[0].approval_status !== 'approved') {
-      return res.status(403).json({
-        Status: false,
-        Error: "คนขับยังไม่ได้รับการอนุมัติ"
-      });
-    }
+  if (driverStatus[0].approval_status !== 'approved') {
+    throw new ForbiddenError(ERROR_MESSAGES.AUTH.ACCOUNT_NOT_APPROVED);
+  }
 
-    // Build query conditions
-    let conditions = ["s.status = 'pending'"];
-    let params = [];
+  // Build query conditions
+  let conditions = [`s.status = '${REQUEST_STATUS.PENDING}'`];
+  let params = [];
 
-    // Filter by vehicle type if provided, otherwise use driver's vehicle type
-    const filterVehicleType = vehicletype_id || driverStatus[0].vehicletype_id;
-    if (filterVehicleType && filterVehicleType !== '99') { // 99 might be "any type" based on your data
-      conditions.push("s.vehicletype_id = ?");
-      params.push(filterVehicleType);
-    }
+  // Filter by vehicle type if provided, otherwise use driver's vehicle type
+  const filterVehicleType = vehicletype_id || driverStatus[0].vehicletype_id;
+  if (filterVehicleType && filterVehicleType !== '99') { // 99 might be "any type" based on your data
+    conditions.push("s.vehicletype_id = ?");
+    params.push(filterVehicleType);
+  }
 
-    // Check if driver has already made an offer for these requests
-    conditions.push("NOT EXISTS (SELECT 1 FROM driveroffers o WHERE o.request_id = s.request_id AND o.driver_id = ?)");
-    params.push(driver_id);
+  // Check if driver has already made an offer for these requests
+  conditions.push("NOT EXISTS (SELECT 1 FROM driveroffers o WHERE o.request_id = s.request_id AND o.driver_id = ?)");
+  params.push(driver_id);
 
-    // Build the base query
-    const sql = `
-      SELECT 
-        s.request_id,
-        s.customer_id,
-        s.location_from,
-        s.location_to,
-        s.pickup_lat,
-        s.pickup_long,
-        s.dropoff_lat,
-        s.dropoff_long,
-        s.status,
-        s.booking_time,
-        s.request_time,
-        s.customer_message,
-        v.vehicletype_name,
-        c.first_name AS customer_first_name,
-        c.last_name AS customer_last_name
-      FROM servicerequests s
-      JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
-      JOIN customers c ON s.customer_id = c.customer_id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY s.request_time DESC
-    `;
+  // Build the base query
+  const sql = `
+    SELECT 
+      s.request_id,
+      s.customer_id,
+      s.location_from,
+      s.location_to,
+      s.pickup_lat,
+      s.pickup_long,
+      s.dropoff_lat,
+      s.dropoff_long,
+      s.status,
+      s.booking_time,
+      s.request_time,
+      s.customer_message,
+      v.vehicletype_name,
+      c.first_name AS customer_first_name,
+      c.last_name AS customer_last_name
+    FROM servicerequests s
+    JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY s.request_time DESC
+  `;
 
-    // Get available requests
-    const requests = await db.query(sql, params);
+  // Get available requests
+  const requests = await db.query(sql, params);
 
-    // Calculate distances if coordinates are provided
-    let availableRequests = requests;
-    if (latitude && longitude) {
-      const searchRadius = radius ? parseFloat(radius) : 20; // Default 20km radius
+  // Calculate distances if coordinates are provided
+  let availableRequests = requests;
+  if (latitude && longitude) {
+    const searchRadius = radius ? parseFloat(radius) : 20; // Default 20km radius
+    
+    // Calculate distance for each request
+    availableRequests = requests.map(request => {
+      const distance = distanceService.calculateDistance(
+        latitude,
+        longitude,
+        request.pickup_lat,
+        request.pickup_long
+      );
       
-      // Calculate distance for each request
-      availableRequests = requests.map(request => {
-        const distance = distanceService.calculateDistance(
-          latitude,
-          longitude,
-          request.pickup_lat,
-          request.pickup_long
-        );
-        
-        return {
-          ...request,
-          distance,
-          distance_text: `${distance.toFixed(1)} กม.`
-        };
-      });
-      
-      // Filter by radius if coordinates are provided
-      availableRequests = availableRequests.filter(request => request.distance <= searchRadius);
-      
-      // Sort by distance
-      availableRequests.sort((a, b) => a.distance - b.distance);
-    }
-
-    return res.status(200).json({
-      Status: true,
-      Count: availableRequests.length,
-      Result: availableRequests
-    });
-  } catch (error) {
-    logger.error('Error fetching available requests', { 
-      driver_id: req.query.driver_id,
-      error: error.message 
+      return {
+        ...request,
+        distance,
+        distance_text: `${distance.toFixed(1)} กม.`
+      };
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    // Filter by radius if coordinates are provided
+    availableRequests = availableRequests.filter(request => request.distance <= searchRadius);
+    
+    // Sort by distance
+    availableRequests.sort((a, b) => a.distance - b.distance);
   }
-};
+
+  // Format date and time for each request
+  availableRequests = availableRequests.map(request => {
+    return {
+      ...request,
+      request_time_formatted: {
+        date: formatDisplayDate(request.request_time),
+        time: formatTimeString(request.request_time)
+      },
+      booking_time_formatted: request.booking_time ? {
+        date: formatDisplayDate(request.booking_time),
+        time: formatTimeString(request.booking_time)
+      } : null
+    };
+  });
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+    Count: availableRequests.length,
+    Result: availableRequests
+  }));
+});
 
 /**
  * Get request details
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const getRequestDetails = async (req, res) => {
-  try {
-    const { request_id, driver_id } = req.query;
+export const getRequestDetails = asyncHandler(async (req, res) => {
+  const { request_id, driver_id } = req.query;
 
-    if (!request_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ request_id"
-      });
-    }
+  if (!request_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id']);
+  }
 
-    // Query request details
-    const sql = `
-      SELECT 
-        s.request_id,
-        s.customer_id,
-        s.location_from,
-        s.location_to,
-        s.pickup_lat,
-        s.pickup_long,
-        s.dropoff_lat,
-        s.dropoff_long,
-        s.status,
-        s.booking_time,
-        s.request_time,
-        s.customer_message,
-        v.vehicletype_name,
-        v.vehicletype_id,
-        c.first_name AS customer_first_name,
-        c.last_name AS customer_last_name,
-        c.phone_number AS customer_phone
-      FROM servicerequests s
-      JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
-      JOIN customers c ON s.customer_id = c.customer_id
-      WHERE s.request_id = ?
+  // Query request details
+  const sql = `
+    SELECT 
+      s.request_id,
+      s.customer_id,
+      s.location_from,
+      s.location_to,
+      s.pickup_lat,
+      s.pickup_long,
+      s.dropoff_lat,
+      s.dropoff_long,
+      s.status,
+      s.booking_time,
+      s.request_time,
+      s.customer_message,
+      v.vehicletype_name,
+      v.vehicletype_id,
+      c.first_name AS customer_first_name,
+      c.last_name AS customer_last_name,
+      c.phone_number AS customer_phone
+    FROM servicerequests s
+    JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE s.request_id = ?
+  `;
+
+  const requests = await db.query(sql, [request_id]);
+
+  if (requests.length === 0) {
+    throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+  }
+
+  const request = requests[0];
+
+  // Format dates
+  request.request_time_formatted = {
+    date: formatDisplayDate(request.request_time),
+    time: formatTimeString(request.request_time)
+  };
+  
+  if (request.booking_time) {
+    request.booking_time_formatted = {
+      date: formatDisplayDate(request.booking_time),
+      time: formatTimeString(request.booking_time)
+    };
+  }
+
+  // If driver_id is provided, check if driver has made an offer for this request
+  if (driver_id) {
+    const offerSql = `
+      SELECT offer_id, offered_price, offer_status, created_at
+      FROM driveroffers
+      WHERE request_id = ? AND driver_id = ?
     `;
-
-    const requests = await db.query(sql, [request_id]);
-
-    if (requests.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบคำขอบริการ"
-      });
+    
+    const offers = await db.query(offerSql, [request_id, driver_id]);
+    if (offers.length > 0) {
+      request.driver_offer = offers[0];
     }
+  }
 
-    const request = requests[0];
-
-    // If driver_id is provided, check if driver has made an offer for this request
-    if (driver_id) {
-      const offerSql = `
-        SELECT offer_id, offered_price, offer_status, created_at
-        FROM driveroffers
-        WHERE request_id = ? AND driver_id = ?
-      `;
-      
-      const offers = await db.query(offerSql, [request_id, driver_id]);
-      if (offers.length > 0) {
-        request.driver_offer = offers[0];
-      }
-    }
-
-    // Calculate route information if driver_id and their location are provided
-    if (driver_id) {
-      const driverLocation = await db.query(
-        "SELECT current_latitude, current_longitude FROM driverdetails WHERE driver_id = ?",
-        [driver_id]
+  // Calculate route information if driver_id and their location are provided
+  if (driver_id) {
+    const driverLocation = await db.query(
+      "SELECT current_latitude, current_longitude FROM driverdetails WHERE driver_id = ?",
+      [driver_id]
+    );
+    
+    if (driverLocation.length > 0 && driverLocation[0].current_latitude && driverLocation[0].current_longitude) {
+      const distance = distanceService.calculateDistance(
+        driverLocation[0].current_latitude,
+        driverLocation[0].current_longitude,
+        request.pickup_lat,
+        request.pickup_long
       );
       
-      if (driverLocation.length > 0 && driverLocation[0].current_latitude && driverLocation[0].current_longitude) {
-        const distance = distanceService.calculateDistance(
-          driverLocation[0].current_latitude,
-          driverLocation[0].current_longitude,
-          request.pickup_lat,
-          request.pickup_long
-        );
-        
-        const eta = distanceService.calculateTravelTime(distance);
-        
-        request.distance_to_pickup = distance;
-        request.distance_to_pickup_text = `${distance.toFixed(1)} กม.`;
-        request.eta_to_pickup = eta;
-        request.eta_to_pickup_text = `${eta} นาที`;
-      }
+      const eta = distanceService.calculateTravelTime(distance);
+      
+      request.distance_to_pickup = distance;
+      request.distance_to_pickup_text = `${distance.toFixed(1)} กม.`;
+      request.eta_to_pickup = eta;
+      request.eta_to_pickup_text = `${eta} นาที`;
     }
+  }
 
-    // Calculate trip distance and estimated price
+  // Calculate trip distance and estimated price
+  const tripDistance = distanceService.calculateDistance(
+    request.pickup_lat,
+    request.pickup_long,
+    request.dropoff_lat,
+    request.dropoff_long
+  );
+  
+  const estimatedPrice = distanceService.calculatePriceEstimate(
+    tripDistance,
+    request.vehicletype_id
+  );
+  
+  request.trip_distance = tripDistance;
+  request.trip_distance_text = `${tripDistance.toFixed(1)} กม.`;
+  request.estimated_duration = distanceService.calculateTravelTime(tripDistance);
+  request.estimated_duration_text = `${request.estimated_duration} นาที`;
+  request.price_estimate = estimatedPrice;
+  request.price_estimate_text = `฿${estimatedPrice}`;
+
+  // Mask customer phone for privacy
+  if (request.customer_phone) {
+    request.customer_phone_masked = maskString(request.customer_phone, 3, 3);
+  }
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse(request));
+});
+
+/**
+ * Get driver's active requests (accepted but not completed)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const getActiveRequests = asyncHandler(async (req, res) => {
+  const { driver_id } = req.params;
+
+  if (!driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
+  }
+
+  const sql = `
+    SELECT 
+      s.request_id,
+      s.customer_id,
+      s.location_from,
+      s.location_to,
+      s.pickup_lat,
+      s.pickup_long,
+      s.dropoff_lat,
+      s.dropoff_long,
+      s.status,
+      s.booking_time,
+      s.request_time,
+      s.customer_message,
+      o.offer_id,
+      o.offered_price,
+      v.vehicletype_name,
+      c.first_name AS customer_first_name,
+      c.last_name AS customer_last_name,
+      c.phone_number AS customer_phone
+    FROM servicerequests s
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE o.driver_id = ? 
+    AND s.status = '${REQUEST_STATUS.ACCEPTED}'
+    AND o.offer_status = '${OFFER_STATUS.ACCEPTED}'
+    ORDER BY s.request_time DESC
+  `;
+
+  const requests = await db.query(sql, [driver_id]);
+
+  // Calculate trip distances for each request
+  const activeRequests = requests.map(request => {
     const tripDistance = distanceService.calculateDistance(
       request.pickup_lat,
       request.pickup_long,
@@ -234,494 +314,318 @@ export const getRequestDetails = async (req, res) => {
       request.dropoff_long
     );
     
-    const estimatedPrice = distanceService.calculatePriceEstimate(
-      tripDistance,
-      request.vehicletype_id
-    );
+    // Format dates
+    const request_time_formatted = {
+      date: formatDisplayDate(request.request_time),
+      time: formatTimeString(request.request_time)
+    };
     
-    request.trip_distance = tripDistance;
-    request.trip_distance_text = `${tripDistance.toFixed(1)} กม.`;
-    request.estimated_duration = distanceService.calculateTravelTime(tripDistance);
-    request.estimated_duration_text = `${request.estimated_duration} นาที`;
-    request.price_estimate = estimatedPrice;
-    request.price_estimate_text = `฿${estimatedPrice}`;
-
-    return res.status(200).json({
-      Status: true,
-      Result: request
-    });
-  } catch (error) {
-    logger.error('Error fetching request details', { 
-      request_id: req.query.request_id,
-      error: error.message 
-    });
+    const booking_time_formatted = request.booking_time ? {
+      date: formatDisplayDate(request.booking_time),
+      time: formatTimeString(request.booking_time)
+    } : null;
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
-  }
-};
-
-/**
- * Get driver's active requests (accepted but not completed)
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export const getActiveRequests = async (req, res) => {
-  try {
-    const { driver_id } = req.params;
-
-    if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
-    }
-
-    const sql = `
-      SELECT 
-        s.request_id,
-        s.customer_id,
-        s.location_from,
-        s.location_to,
-        s.pickup_lat,
-        s.pickup_long,
-        s.dropoff_lat,
-        s.dropoff_long,
-        s.status,
-        s.booking_time,
-        s.request_time,
-        s.customer_message,
-        o.offer_id,
-        o.offered_price,
-        v.vehicletype_name,
-        c.first_name AS customer_first_name,
-        c.last_name AS customer_last_name,
-        c.phone_number AS customer_phone
-      FROM servicerequests s
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
-      JOIN customers c ON s.customer_id = c.customer_id
-      WHERE o.driver_id = ? 
-      AND s.status = 'accepted'
-      AND o.offer_status = 'accepted'
-      ORDER BY s.request_time DESC
-    `;
-
-    const requests = await db.query(sql, [driver_id]);
-
-    // Calculate trip distances for each request
-    const activeRequests = requests.map(request => {
-      const tripDistance = distanceService.calculateDistance(
-        request.pickup_lat,
-        request.pickup_long,
-        request.dropoff_lat,
-        request.dropoff_long
-      );
-      
-      return {
-        ...request,
-        trip_distance: tripDistance,
-        trip_distance_text: `${tripDistance.toFixed(1)} กม.`,
-        estimated_duration: distanceService.calculateTravelTime(tripDistance),
-      };
-    });
-
-    return res.status(200).json({
-      Status: true,
-      Count: activeRequests.length,
-      Result: activeRequests
-    });
-  } catch (error) {
-    logger.error('Error fetching active requests', { 
-      driver_id: req.params.driver_id,
-      error: error.message 
-    });
+    // Mask customer phone
+    const customer_phone_masked = request.customer_phone ? 
+      maskString(request.customer_phone, 3, 3) : null;
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
-  }
-};
+    return {
+      ...request,
+      trip_distance: tripDistance,
+      trip_distance_text: `${tripDistance.toFixed(1)} กม.`,
+      estimated_duration: distanceService.calculateTravelTime(tripDistance),
+      estimated_duration_text: `${distanceService.calculateTravelTime(tripDistance)} นาที`,
+      request_time_formatted,
+      booking_time_formatted,
+      customer_phone_masked
+    };
+  });
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+    Count: activeRequests.length,
+    Result: activeRequests
+  }));
+});
 
 /**
  * Update request status to completed
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const completeRequest = async (req, res) => {
+export const completeRequest = asyncHandler(async (req, res) => {
+  const { request_id, driver_id } = req.body;
+
+  if (!request_id || !driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
+  }
+
+  // Verify the driver is assigned to this request
+  const verifyQuery = `
+    SELECT s.request_id, s.status, s.customer_id
+    FROM servicerequests s
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    WHERE s.request_id = ? AND o.driver_id = ? AND s.status = '${REQUEST_STATUS.ACCEPTED}'
+  `;
+
+  const verification = await db.query(verifyQuery, [request_id, driver_id]);
+
+  if (verification.length === 0) {
+    throw new NotFoundError(ERROR_MESSAGES.REQUEST.CANNOT_COMPLETE);
+  }
+
+  const customer_id = verification[0].customer_id;
+
+  // Start transaction
+  const connection = await db.beginTransaction();
+  
   try {
-    const { request_id, driver_id } = req.body;
-
-    if (!request_id || !driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ request_id และ driver_id"
-      });
-    }
-
-    // Verify the driver is assigned to this request
-    const verifyQuery = `
-      SELECT s.request_id, s.status, s.customer_id
-      FROM servicerequests s
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      WHERE s.request_id = ? AND o.driver_id = ? AND s.status = 'accepted'
+    // Update request status
+    const updateSql = `
+      UPDATE servicerequests
+      SET status = '${REQUEST_STATUS.COMPLETED}'
+      WHERE request_id = ?
     `;
 
-    const verification = await db.query(verifyQuery, [request_id, driver_id]);
+    await db.transactionQuery(connection, updateSql, [request_id]);
 
-    if (verification.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบคำขอบริการที่กำลังดำเนินการ หรือคนขับไม่ได้รับมอบหมายให้ดำเนินการคำขอนี้"
+    // Add to driver logs if not exists
+    const logCheckSql = `
+      SELECT log_id FROM driverlogs
+      WHERE request_id = ? AND driver_id = ?
+    `;
+
+    const logCheck = await db.transactionQuery(connection, logCheckSql, [request_id, driver_id]);
+
+    if (logCheck.length === 0) {
+      const createLogSql = `
+        INSERT INTO driverlogs (request_id, driver_id, created_at)
+        VALUES (?, ?, NOW())
+      `;
+
+      await db.transactionQuery(connection, createLogSql, [request_id, driver_id]);
+    }
+
+    // Commit transaction
+    await db.commitTransaction(connection);
+
+    // Notify customer via socket if available
+    if (socketService) {
+      socketService.notifyCustomer(customer_id, 'requestCompleted', {
+        request_id,
+        driver_id,
+        status: REQUEST_STATUS.COMPLETED
       });
     }
 
-    const customer_id = verification[0].customer_id;
+    logger.info('Driver completed request', { driver_id, request_id });
 
-    // Start transaction
-    const connection = await db.beginTransaction();
-    
-    try {
-      // Update request status
-      const updateSql = `
-        UPDATE servicerequests
-        SET status = 'completed'
-        WHERE request_id = ?
-      `;
-
-      await db.transactionQuery(connection, updateSql, [request_id]);
-
-      // Add to driver logs if not exists
-      const logCheckSql = `
-        SELECT log_id FROM driverlogs
-        WHERE request_id = ? AND driver_id = ?
-      `;
-
-      const logCheck = await db.transactionQuery(connection, logCheckSql, [request_id, driver_id]);
-
-      if (logCheck.length === 0) {
-        const createLogSql = `
-          INSERT INTO driverlogs (request_id, driver_id, created_at)
-          VALUES (?, ?, NOW())
-        `;
-
-        await db.transactionQuery(connection, createLogSql, [request_id, driver_id]);
-      }
-
-      // Commit transaction
-      await db.commitTransaction(connection);
-
-      // Notify customer via socket if available
-      if (socketService) {
-        socketService.notifyCustomer(customer_id, 'requestCompleted', {
-          request_id,
-          driver_id,
-          status: 'completed'
-        });
-      }
-
-      logger.info('Driver completed request', { driver_id, request_id });
-
-      return res.status(200).json({
-        Status: true,
-        Message: "เสร็จสิ้นการให้บริการเรียบร้อย",
-        request_id
-      });
-    } catch (error) {
-      // Rollback transaction on error
-      await db.rollbackTransaction(connection);
-      throw error;
-    }
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      request_id,
+      status: REQUEST_STATUS.COMPLETED
+    }, "เสร็จสิ้นการให้บริการเรียบร้อย"));
   } catch (error) {
-    logger.error('Error completing request', { 
-      request_id: req.body.request_id,
-      driver_id: req.body.driver_id,
-      error: error.message 
-    });
-    
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    // Rollback transaction on error
+    await db.rollbackTransaction(connection);
+    throw new DatabaseError(ERROR_MESSAGES.DATABASE.TRANSACTION_ERROR, error);
   }
-};
+});
 
 /**
  * Notify customer of driver arrival
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const notifyArrival = async (req, res) => {
-  try {
-    const { request_id, driver_id } = req.body;
+export const notifyArrival = asyncHandler(async (req, res) => {
+  const { request_id, driver_id } = req.body;
 
-    if (!request_id || !driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ request_id และ driver_id"
-      });
-    }
+  if (!request_id || !driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
+  }
 
-    // Verify the driver is assigned to this request
-    const verifyQuery = `
-      SELECT s.request_id, s.status, s.customer_id, d.first_name, d.last_name, d.license_plate
-      FROM servicerequests s
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      JOIN drivers d ON o.driver_id = d.driver_id
-      WHERE s.request_id = ? AND o.driver_id = ? AND s.status = 'accepted'
-    `;
+  // Verify the driver is assigned to this request
+  const verifyQuery = `
+    SELECT s.request_id, s.status, s.customer_id, d.first_name, d.last_name, d.license_plate
+    FROM servicerequests s
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    JOIN drivers d ON o.driver_id = d.driver_id
+    WHERE s.request_id = ? AND o.driver_id = ? AND s.status = '${REQUEST_STATUS.ACCEPTED}'
+  `;
 
-    const verification = await db.query(verifyQuery, [request_id, driver_id]);
+  const verification = await db.query(verifyQuery, [request_id, driver_id]);
 
-    if (verification.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบคำขอบริการที่กำลังดำเนินการ หรือคนขับไม่ได้รับมอบหมายให้ดำเนินการคำขอนี้"
-      });
-    }
+  if (verification.length === 0) {
+    throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+  }
 
-    const requestInfo = verification[0];
-    const driverName = `${requestInfo.first_name || ''} ${requestInfo.last_name || ''}`.trim();
-    const licensePlate = requestInfo.license_plate;
+  const requestInfo = verification[0];
+  const driverName = `${requestInfo.first_name || ''} ${requestInfo.last_name || ''}`.trim();
+  const licensePlate = requestInfo.license_plate;
 
-    // Notify customer via socket if available
-    if (socketService) {
-      socketService.notifyCustomer(requestInfo.customer_id, 'driverArrived', {
-        request_id,
-        driver_id,
-        driver_name: driverName,
-        license_plate: licensePlate
-      });
-    }
-
-    logger.info('Driver notified arrival', { 
-      driver_id, 
+  // Notify customer via socket if available
+  if (socketService) {
+    socketService.notifyCustomer(requestInfo.customer_id, 'driverArrived', {
       request_id,
-      customer_id: requestInfo.customer_id
-    });
-
-    return res.status(200).json({
-      Status: true,
-      Message: "แจ้งเตือนลูกค้าว่าคนขับมาถึงแล้วเรียบร้อย"
-    });
-  } catch (error) {
-    logger.error('Error notifying arrival', { 
-      request_id: req.body.request_id,
-      driver_id: req.body.driver_id,
-      error: error.message 
-    });
-    
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
+      driver_id,
+      driver_name: driverName,
+      license_plate: licensePlate
     });
   }
-};
+
+  logger.info('Driver notified arrival', { 
+    driver_id, 
+    request_id,
+    customer_id: requestInfo.customer_id
+  });
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse(null, "แจ้งเตือนลูกค้าว่าคนขับมาถึงแล้วเรียบร้อย"));
+});
 
 /**
  * Get service request history
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const getRequestHistory = async (req, res) => {
-  try {
-    const { driver_id } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
-    const offset = parseInt(req.query.offset) || 0;
-    const status = req.query.status; // 'completed', 'cancelled', or all if not specified
+export const getRequestHistory = asyncHandler(async (req, res) => {
+  const { driver_id } = req.params;
+  const limit = parseInt(req.query.limit) || 20;
+  const offset = parseInt(req.query.offset) || 0;
+  const status = req.query.status; // 'completed', 'cancelled', or all if not specified
 
-    if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
-    }
-
-    // Build query conditions
-    let conditions = ["o.driver_id = ?"];
-    const params = [driver_id];
-
-    if (status) {
-      if (status === 'completed' || status === 'cancelled') {
-        conditions.push("s.status = ?");
-        params.push(status);
-      } else {
-        conditions.push("s.status IN ('completed', 'cancelled')");
-      }
-    } else {
-      conditions.push("s.status IN ('completed', 'cancelled')");
-    }
-
-    // Add pagination parameters
-    params.push(limit, offset);
-
-    const sql = `
-      SELECT 
-        s.request_id,
-        s.location_from,
-        s.location_to,
-        s.status,
-        s.request_time,
-        o.offered_price,
-        v.vehicletype_name,
-        c.first_name AS customer_first_name,
-        c.last_name AS customer_last_name,
-        (SELECT AVG(rating) FROM reviews WHERE request_id = s.request_id AND driver_id = o.driver_id) AS rating
-      FROM servicerequests s
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
-      JOIN customers c ON s.customer_id = c.customer_id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY s.request_time DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    // Count total for pagination
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM servicerequests s
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      WHERE ${conditions.join(" AND ")}
-    `;
-
-    // Remove pagination parameters for count
-    const countParams = params.slice(0, -2);
-
-    const [requests, countResult] = await Promise.all([
-      db.query(sql, params),
-      db.query(countSql, countParams)
-    ]);
-
-    // Format response
-    const history = requests.map(request => ({
-      ...request,
-      rating: request.rating ? parseFloat(request.rating).toFixed(1) : null,
-      request_date: new Date(request.request_time).toLocaleDateString('th-TH'),
-      request_time: new Date(request.request_time).toLocaleTimeString('th-TH')
-    }));
-
-    return res.status(200).json({
-      Status: true,
-      Count: history.length,
-      Total: countResult[0].total,
-      Result: history,
-      Pagination: {
-        limit,
-        offset,
-        totalPages: Math.ceil(countResult[0].total / limit)
-      }
-    });
-  } catch (error) {
-    logger.error('Error fetching request history', { 
-      driver_id: req.params.driver_id,
-      error: error.message 
-    });
-    
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+  if (!driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
   }
-};
+
+  // Build query conditions
+  let conditions = ["o.driver_id = ?"];
+  const params = [driver_id];
+
+  if (status) {
+    if (status === REQUEST_STATUS.COMPLETED || status === REQUEST_STATUS.CANCELLED) {
+      conditions.push("s.status = ?");
+      params.push(status);
+    } else {
+      conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
+    }
+  } else {
+    conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
+  }
+
+  // Add pagination parameters
+  params.push(limit, offset);
+
+  const sql = `
+    SELECT 
+      s.request_id,
+      s.location_from,
+      s.location_to,
+      s.status,
+      s.request_time,
+      o.offered_price,
+      v.vehicletype_name,
+      c.first_name AS customer_first_name,
+      c.last_name AS customer_last_name,
+      (SELECT AVG(rating) FROM reviews WHERE request_id = s.request_id AND driver_id = o.driver_id) AS rating
+    FROM servicerequests s
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY s.request_time DESC
+    LIMIT ? OFFSET ?
+  `;
+
+  // Count total for pagination
+  const countSql = `
+    SELECT COUNT(*) AS total
+    FROM servicerequests s
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    WHERE ${conditions.join(" AND ")}
+  `;
+
+  // Remove pagination parameters for count
+  const countParams = params.slice(0, -2);
+
+  const [requests, countResult] = await Promise.all([
+    db.query(sql, params),
+    db.query(countSql, countParams)
+  ]);
+
+  // Format response
+  const history = requests.map(request => ({
+    ...request,
+    rating: request.rating ? parseFloat(request.rating).toFixed(1) : null,
+    request_date: formatDisplayDate(request.request_time),
+    request_time: formatTimeString(request.request_time)
+  }));
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+    Result: history,
+    Count: history.length,
+    Total: countResult[0].total,
+    Pagination: {
+      limit,
+      offset,
+      totalPages: Math.ceil(countResult[0].total / limit)
+    }
+  }));
+});
 
 /**
  * Get customer information for a specific request
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const getCustomerInfo = async (req, res) => {
-  try {
-    const { request_id, driver_id } = req.query;
+export const getCustomerInfo = asyncHandler(async (req, res) => {
+  const { request_id, driver_id } = req.query;
 
-    if (!request_id || !driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ request_id และ driver_id"
-      });
-    }
-
-    // Verify the driver is assigned to this request
-    const sql = `
-      SELECT 
-        c.customer_id,
-        c.first_name,
-        c.last_name,
-        c.phone_number,
-        c.created_at AS member_since,
-        (SELECT COUNT(*) FROM servicerequests sr 
-         JOIN driveroffers dro ON sr.offer_id = dro.offer_id 
-         WHERE sr.customer_id = c.customer_id AND sr.status = 'completed') AS total_trips,
-        (SELECT AVG(rating) FROM reviews WHERE customer_id = c.customer_id) AS average_rating
-      FROM servicerequests s
-      JOIN customers c ON s.customer_id = c.customer_id
-      JOIN driveroffers o ON s.offer_id = o.offer_id
-      WHERE s.request_id = ? AND o.driver_id = ?
-    `;
-
-    const result = await db.query(sql, [request_id, driver_id]);
-
-    if (result.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อมูลลูกค้า หรือคนขับไม่ได้รับมอบหมายให้ดำเนินการคำขอนี้"
-      });
-    }
-
-    const customer = result[0];
-
-    // Format data
-    if (customer.average_rating) {
-      customer.average_rating = parseFloat(customer.average_rating).toFixed(1);
-    } else {
-      customer.average_rating = "0.0";
-    }
-
-    if (customer.member_since) {
-      customer.member_since_formatted = new Date(customer.member_since)
-        .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
-    }
-
-    // Mask phone number for privacy
-    if (customer.phone_number) {
-      customer.phone_number_masked = maskPhone(customer.phone_number);
-    }
-
-    return res.status(200).json({
-      Status: true,
-      Result: customer
-    });
-  } catch (error) {
-    logger.error('Error fetching customer info', { 
-      request_id: req.query.request_id,
-      driver_id: req.query.driver_id,
-      error: error.message 
-    });
-    
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+  if (!request_id || !driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
   }
-};
 
-/**
- * Helper function to mask phone number
- * @param {string} phone - Phone number to mask
- * @returns {string} Masked phone number
- */
-function maskPhone(phone) {
-  if (!phone) return '';
-  if (phone.length <= 6) return phone;
-  
-  const firstPart = phone.substring(0, 3);
-  const lastPart = phone.substring(phone.length - 3);
-  const maskedPart = '*'.repeat(phone.length - 6);
-  
-  return `${firstPart}${maskedPart}${lastPart}`;
-}
+  // Verify the driver is assigned to this request
+  const sql = `
+    SELECT 
+      c.customer_id,
+      c.first_name,
+      c.last_name,
+      c.phone_number,
+      c.created_at AS member_since,
+      (SELECT COUNT(*) FROM servicerequests sr 
+       JOIN driveroffers dro ON sr.offer_id = dro.offer_id 
+       WHERE sr.customer_id = c.customer_id AND sr.status = '${REQUEST_STATUS.COMPLETED}') AS total_trips,
+      (SELECT AVG(rating) FROM reviews WHERE customer_id = c.customer_id) AS average_rating
+    FROM servicerequests s
+    JOIN customers c ON s.customer_id = c.customer_id
+    JOIN driveroffers o ON s.offer_id = o.offer_id
+    WHERE s.request_id = ? AND o.driver_id = ?
+  `;
+
+  const result = await db.query(sql, [request_id, driver_id]);
+
+  if (result.length === 0) {
+    throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+  }
+
+  const customer = result[0];
+
+  // Format data
+  if (customer.average_rating) {
+    customer.average_rating = parseFloat(customer.average_rating).toFixed(1);
+  } else {
+    customer.average_rating = "0.0";
+  }
+
+  if (customer.member_since) {
+    customer.member_since_formatted = formatDisplayDate(customer.member_since);
+  }
+
+  // Mask phone number for privacy
+  if (customer.phone_number) {
+    customer.phone_number_masked = maskString(customer.phone_number, 3, 3);
+  }
+
+  return res.status(STATUS_CODES.OK).json(formatSuccessResponse(customer));
+});
 
 export default {
   getAvailableRequests,

@@ -3,10 +3,14 @@
  */
 import db from '../../config/db.js';
 import logger from '../../config/logger.js';
-import { DatabaseError } from '../../utils/errors/customErrors.js';
+import { DatabaseError, ValidationError, NotFoundError } from '../../utils/errors/customErrors.js';
+import { STATUS_CODES, getStatusCodeDescription } from '../../utils/constants/statusCodes.js';
+import { formatSuccessResponse, formatErrorResponse } from '../../utils/formatters/responseFormatter.js';
+import { ERROR_MESSAGES } from '../../utils/errors/errorMessages.js';
 import driverModel from '../../models/driverModel.js';
 import mapService from '../../services/location/mapService.js';
 import distanceService from '../../services/location/distanceService.js';
+import socketService from '../../services/communication/socketService.js';
 
 /**
  * Update driver location
@@ -19,18 +23,12 @@ export const updateDriverLocation = async (req, res) => {
 
     // Validate required parameters
     if (!driver_id || !current_latitude || !current_longitude) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id, current_latitude และ current_longitude"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
     }
 
     // Validate coordinates format
     if (isNaN(parseFloat(current_latitude)) || isNaN(parseFloat(current_longitude))) {
-      return res.status(400).json({
-        Status: false,
-        Error: "พิกัดไม่ถูกต้อง"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
     }
 
     // Update driver location in database
@@ -41,36 +39,42 @@ export const updateDriverLocation = async (req, res) => {
     );
 
     if (!result) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบคนขับหรือการอัปเดตล้มเหลว"
+      throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+    }
+
+    // Notify any active requests about driver location update
+    if (socketService) {
+      socketService.notifyDriverLocationUpdate(driver_id, {
+        latitude: parseFloat(current_latitude),
+        longitude: parseFloat(current_longitude),
+        timestamp: new Date().toISOString()
       });
     }
 
-    return res.status(200).json({
-      Status: true,
-      Message: "อัปเดตตำแหน่งสำเร็จ",
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
       Location: {
         driver_id,
         latitude: parseFloat(current_latitude),
         longitude: parseFloat(current_longitude),
         updated_at: new Date().toISOString()
       }
-    });
+    }, "อัปเดตตำแหน่งสำเร็จ"));
   } catch (error) {
     logger.error('Error updating driver location', { error: error.message });
     
-    if (error instanceof DatabaseError) {
-      return res.status(500).json({
-        Status: false,
-        Error: "เกิดข้อผิดพลาดในฐานข้อมูล"
-      });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
     }
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse("ไม่พบคนขับหรือการอัปเดตล้มเหลว"));
+    }
+    
+    if (error instanceof DatabaseError) {
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -84,10 +88,7 @@ export const getDriverLocation = async (req, res) => {
     const { driver_id } = req.params;
 
     if (!driver_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ driver_id"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
     }
 
     // Query driver location from database
@@ -103,33 +104,32 @@ export const getDriverLocation = async (req, res) => {
     );
 
     if (result.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อมูลตำแหน่งของคนขับ"
-      });
+      throw new NotFoundError("ไม่พบข้อมูลตำแหน่งของคนขับ");
     }
 
     const location = result[0];
 
-    return res.status(200).json({
-      Status: true,
-      Result: {
-        driver_id: location.driver_id,
-        latitude: parseFloat(location.current_latitude),
-        longitude: parseFloat(location.current_longitude),
-        updated_at: location.updated_at
-      }
-    });
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      driver_id: location.driver_id,
+      latitude: parseFloat(location.current_latitude),
+      longitude: parseFloat(location.current_longitude),
+      updated_at: location.updated_at
+    }));
   } catch (error) {
     logger.error('Error getting driver location', { 
       driver_id: req.params.driver_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -144,24 +144,18 @@ export const findNearbyDrivers = async (req, res) => {
 
     // Validate required parameters
     if (!latitude || !longitude) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ latitude และ longitude"
-      });
+      throw new ValidationError("กรุณาระบุ latitude และ longitude");
     }
 
     // Validate coordinates format
     if (isNaN(parseFloat(latitude)) || isNaN(parseFloat(longitude))) {
-      return res.status(400).json({
-        Status: false,
-        Error: "พิกัดไม่ถูกต้อง"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
     }
 
     // Set default radius if not provided
     const searchRadius = radius ? parseFloat(radius) : 10; // Default 10km
 
-    // Find nearby drivers
+    // Find nearby drivers using the map service
     const drivers = await mapService.findNearbyDrivers(
       latitude,
       longitude,
@@ -183,21 +177,21 @@ export const findNearbyDrivers = async (req, res) => {
       distance_text: `${driver.distance.toFixed(2)} กม.`
     }));
 
-    return res.status(200).json({
-      Status: true,
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
       Count: formattedDrivers.length,
       Result: formattedDrivers
-    });
+    }));
   } catch (error) {
     logger.error('Error finding nearby drivers', { 
       location: `${req.query.latitude},${req.query.longitude}`,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -212,10 +206,7 @@ export const calculateDistance = async (req, res) => {
 
     // Validate required parameters
     if (!origin_lat || !origin_lng || !destination_lat || !destination_lng) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุพิกัดต้นทางและปลายทางให้ครบถ้วน"
-      });
+      throw new ValidationError("กรุณาระบุพิกัดต้นทางและปลายทางให้ครบถ้วน");
     }
 
     // Validate coordinates format
@@ -225,13 +216,10 @@ export const calculateDistance = async (req, res) => {
       isNaN(parseFloat(destination_lat)) || 
       isNaN(parseFloat(destination_lng))
     ) {
-      return res.status(400).json({
-        Status: false,
-        Error: "พิกัดไม่ถูกต้อง"
-      });
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
     }
 
-    // Calculate distance
+    // Calculate distance using the distance service
     const distance = distanceService.calculateDistance(
       origin_lat,
       origin_lng,
@@ -251,23 +239,21 @@ export const calculateDistance = async (req, res) => {
       );
     }
 
-    return res.status(200).json({
-      Status: true,
-      Result: {
-        distance: distance,
-        distance_text: `${distance} กม.`,
-        duration: travelTime,
-        duration_text: `${travelTime} นาที`,
-        price_estimate: priceEstimate ? `฿${priceEstimate}` : null
-      }
-    });
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      distance: distance,
+      distance_text: `${distance} กม.`,
+      duration: travelTime,
+      duration_text: `${travelTime} นาที`,
+      price_estimate: priceEstimate ? `฿${priceEstimate}` : null
+    }));
   } catch (error) {
     logger.error('Error calculating distance', { error: error.message });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
@@ -281,10 +267,7 @@ export const getDriverTracking = async (req, res) => {
     const { request_id, customer_id } = req.params;
 
     if (!request_id || !customer_id) {
-      return res.status(400).json({
-        Status: false,
-        Error: "กรุณาระบุ request_id และ customer_id"
-      });
+      throw new ValidationError("กรุณาระบุ request_id และ customer_id");
     }
 
     // Get request and driver information
@@ -317,15 +300,12 @@ export const getDriverTracking = async (req, res) => {
     const result = await db.query(sql, [request_id, customer_id]);
 
     if (result.length === 0) {
-      return res.status(404).json({
-        Status: false,
-        Error: "ไม่พบข้อมูลการเดินทาง หรือสถานะไม่ถูกต้อง"
-      });
+      throw new NotFoundError("ไม่พบข้อมูลการเดินทาง หรือสถานะไม่ถูกต้อง");
     }
 
     const trackingInfo = result[0];
 
-    // Calculate distance and ETA from driver to pickup
+    // Calculate distance and ETA from driver to pickup using distance service
     let distanceToPickup = null;
     let etaToPickup = null;
 
@@ -340,46 +320,48 @@ export const getDriverTracking = async (req, res) => {
       etaToPickup = distanceService.calculateTravelTime(distanceToPickup);
     }
 
-    return res.status(200).json({
-      Status: true,
-      Result: {
-        request_id: trackingInfo.request_id,
-        driver: {
-          driver_id: trackingInfo.driver_id,
-          name: `${trackingInfo.driver_first_name || ''} ${trackingInfo.driver_last_name || ''}`.trim(),
-          phone: trackingInfo.driver_phone,
-          license_plate: trackingInfo.license_plate,
-          location: {
-            latitude: parseFloat(trackingInfo.current_latitude),
-            longitude: parseFloat(trackingInfo.current_longitude),
-            updated_at: trackingInfo.location_updated_at
-          }
-        },
-        pickup: {
-          latitude: parseFloat(trackingInfo.pickup_lat),
-          longitude: parseFloat(trackingInfo.pickup_long),
-          address: trackingInfo.location_from
-        },
-        dropoff: {
-          latitude: parseFloat(trackingInfo.dropoff_lat),
-          longitude: parseFloat(trackingInfo.dropoff_long),
-          address: trackingInfo.location_to
-        },
-        status: trackingInfo.status,
-        distance_to_pickup: distanceToPickup,
-        eta_to_pickup: etaToPickup ? `${etaToPickup} นาที` : null
-      }
-    });
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      request_id: trackingInfo.request_id,
+      driver: {
+        driver_id: trackingInfo.driver_id,
+        name: `${trackingInfo.driver_first_name || ''} ${trackingInfo.driver_last_name || ''}`.trim(),
+        phone: trackingInfo.driver_phone,
+        license_plate: trackingInfo.license_plate,
+        location: {
+          latitude: parseFloat(trackingInfo.current_latitude),
+          longitude: parseFloat(trackingInfo.current_longitude),
+          updated_at: trackingInfo.location_updated_at
+        }
+      },
+      pickup: {
+        latitude: parseFloat(trackingInfo.pickup_lat),
+        longitude: parseFloat(trackingInfo.pickup_long),
+        address: trackingInfo.location_from
+      },
+      dropoff: {
+        latitude: parseFloat(trackingInfo.dropoff_lat),
+        longitude: parseFloat(trackingInfo.dropoff_long),
+        address: trackingInfo.location_to
+      },
+      status: trackingInfo.status,
+      distance_to_pickup: distanceToPickup,
+      eta_to_pickup: etaToPickup ? `${etaToPickup} นาที` : null
+    }));
   } catch (error) {
     logger.error('Error getting driver tracking', { 
       request_id: req.params.request_id,
       error: error.message 
     });
     
-    return res.status(500).json({
-      Status: false,
-      Error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"
-    });
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    if (error instanceof NotFoundError) {
+      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
   }
 };
 
