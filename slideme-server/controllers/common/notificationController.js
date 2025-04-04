@@ -519,14 +519,20 @@ export const broadcastNotification = asyncHandler(async (req, res) => {
 });
 
 // เพิ่มฟังก์ชันนี้ใน notificationController.js
+// Fixed getAllNotifications function
 export const getAllNotifications = asyncHandler(async (req, res) => {
-    // โค้ดสำหรับดึงการแจ้งเตือนทั้งหมด
-    // อาจคล้ายกับ getUserNotifications แต่อาจไม่ต้องการ user_id หรือ user_type
-    
-    const { limit, offset } = req.query;
-    const limitValue = parseInt(limit) || 20;
-    const offsetValue = parseInt(offset) || 0;
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : "20";
+    const offset = req.query.offset ? parseInt(req.query.offset, 10) : "0";
   
+    // Validate limit and offset
+    if (isNaN(limit) || isNaN(offset) || limit <= 0 || offset < 0) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(
+        formatErrorResponse("Invalid limit or offset parameters")
+      );
+    }
+  
+    const countSql = `SELECT COUNT(*) AS total FROM app_notifications`;
+    
     const sql = `
       SELECT 
         id,
@@ -544,7 +550,11 @@ export const getAllNotifications = asyncHandler(async (req, res) => {
     `;
   
     try {
-      const notifications = await db.query(sql, [limitValue, offsetValue]);
+      // Execute both queries in parallel
+      const [notifications, countResult] = await Promise.all([
+        db.query(sql, [limit, offset]),
+        db.query(countSql)
+      ]);
       
       // Format notification dates
       const formattedNotifications = notifications.map(notification => ({
@@ -555,11 +565,23 @@ export const getAllNotifications = asyncHandler(async (req, res) => {
         }
       }));
   
+      const total = countResult[0].total;
+  
       return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-        Result: formattedNotifications
+        Result: formattedNotifications,
+        Pagination: {
+          total,
+          limit,
+          offset,
+          totalPages: Math.ceil(total / limit)
+        }
       }));
     } catch (error) {
-      logger.error('Error fetching all notifications', { error: error.message });
+      logger.error('Error fetching all notifications', { 
+        limit, 
+        offset, 
+        error: error.message 
+      });
       throw new DatabaseError(ERROR_MESSAGES.DATABASE.QUERY_ERROR, error);
     }
   });

@@ -18,65 +18,75 @@ import socketService from '../../services/communication/socketService.js';
  * @param {Object} res - Express response object
  */
 export const updateDriverLocation = async (req, res) => {
-  try {
-    const { driver_id, current_latitude, current_longitude } = req.body;
-
-    // Validate required parameters
-    if (!driver_id || !current_latitude || !current_longitude) {
-      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
-    }
-
-    // Validate coordinates format
-    if (isNaN(parseFloat(current_latitude)) || isNaN(parseFloat(current_longitude))) {
-      throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
-    }
-
-    // Update driver location in database
-    const result = await driverModel.updateDriverLocation(
-      driver_id,
-      current_latitude,
-      current_longitude
-    );
-
-    if (!result) {
-      throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
-    }
-
-    // Notify any active requests about driver location update
-    if (socketService) {
-      socketService.notifyDriverLocationUpdate(driver_id, {
-        latitude: parseFloat(current_latitude),
-        longitude: parseFloat(current_longitude),
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-      Location: {
-        driver_id,
-        latitude: parseFloat(current_latitude),
-        longitude: parseFloat(current_longitude),
-        updated_at: new Date().toISOString()
+    try {
+      const { driver_id, current_latitude, current_longitude } = req.body;
+  
+      // Validate required parameters
+      if (!driver_id || !current_latitude || !current_longitude) {
+        throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
       }
-    }, "อัปเดตตำแหน่งสำเร็จ"));
-  } catch (error) {
-    logger.error('Error updating driver location', { error: error.message });
-    
-    if (error instanceof ValidationError) {
-      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+  
+      // Validate coordinates format
+      if (isNaN(parseFloat(current_latitude)) || isNaN(parseFloat(current_longitude))) {
+        throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
+      }
+  
+      // Update driver location in database
+      const result = await driverModel.updateDriverLocation(
+        driver_id,
+        current_latitude,
+        current_longitude
+      );
+  
+      if (!result) {
+        throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
+      }
+  
+      // Notify any active requests about driver location update using standard emit method
+      try {
+        if (socketService) {
+          // Just use the standard emit method that every Socket.io instance has
+          socketService.emit('driverLocationUpdate', {
+            driver_id,
+            latitude: parseFloat(current_latitude),
+            longitude: parseFloat(current_longitude),
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (socketError) {
+        // Log but don't fail if socket notification fails
+        logger.warn('Could not send socket notification for location update', { 
+          error: socketError.message,
+          driver_id 
+        });
+      }
+  
+      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+        Location: {
+          driver_id,
+          latitude: parseFloat(current_latitude),
+          longitude: parseFloat(current_longitude),
+          updated_at: new Date().toISOString()
+        }
+      }, "อัปเดตตำแหน่งสำเร็จ"));
+    } catch (error) {
+      logger.error('Error updating driver location', { error: error.message });
+      
+      if (error instanceof ValidationError) {
+        return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+      }
+      
+      if (error instanceof NotFoundError) {
+        return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse("ไม่พบคนขับหรือการอัปเดตล้มเหลว"));
+      }
+      
+      if (error instanceof DatabaseError) {
+        return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR));
+      }
+      
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
     }
-    
-    if (error instanceof NotFoundError) {
-      return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse("ไม่พบคนขับหรือการอัปเดตล้มเหลว"));
-    }
-    
-    if (error instanceof DatabaseError) {
-      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR));
-    }
-    
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
-  }
-};
+  };
 
 /**
  * Get driver current location

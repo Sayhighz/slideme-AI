@@ -86,86 +86,89 @@ export const getTotalEarnings = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 export const getEarningsHistory = asyncHandler(async (req, res) => {
-  const { driver_id } = req.query;
-  const limit = parseInt(req.query.limit) || 20;
-  const offset = parseInt(req.query.offset) || 0;
-
-  if (!driver_id) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, [
-      "กรุณาระบุ driver_id"
-    ]);
-  }
-
-  try {
-    const sql = `
-      SELECT 
-        r.request_id,
-        r.location_from,
-        r.location_to,
-        r.status,
-        r.request_time,
-        o.offered_price,
-        c.first_name AS customer_first_name,
-        c.last_name AS customer_last_name
-      FROM servicerequests r
-      JOIN driveroffers o ON r.offer_id = o.offer_id
-      JOIN customers c ON r.customer_id = c.customer_id
-      WHERE o.driver_id = ?
-      AND r.status = 'completed'
-      ORDER BY r.request_time DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    const result = await db.query(sql, [driver_id, limit, offset]);
-
-    // Process the earnings - calculate driver payouts
-    const formattedEarnings = result.map(trip => {
-      const driverEarnings = calculateDriverPayout(trip.offered_price);
+    const { driver_id } = req.query;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = parseInt(req.query.offset) || 0;
+  
+    if (!driver_id) {
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, [
+        "กรุณาระบุ driver_id"
+      ]);
+    }
+  
+    try {
+      const sql = `
+        SELECT 
+          r.request_id,
+          r.location_from,
+          r.location_to,
+          r.status,
+          r.request_time,
+          o.offered_price,
+          c.first_name AS customer_first_name,
+          c.last_name AS customer_last_name
+        FROM servicerequests r
+        JOIN driveroffers o ON r.offer_id = o.offer_id
+        JOIN customers c ON r.customer_id = c.customer_id
+        WHERE o.driver_id = ?
+        AND r.status = 'completed'
+        ORDER BY r.request_time DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+  
+      const result = await db.query(sql, [driver_id]);
+  
+      // Process the earnings - calculate driver payouts
+      const formattedEarnings = result.map(trip => {
+        const driverEarnings = calculateDriverPayout(trip.offered_price);
+        
+        return {
+          ...trip,
+          customer_name: `${trip.customer_first_name || ''} ${trip.customer_last_name || ''}`.trim(),
+          total_fare: trip.offered_price,
+          total_fare_formatted: formatThaiBaht(trip.offered_price),
+          driver_earnings: driverEarnings,
+          driver_earnings_formatted: formatThaiBaht(driverEarnings),
+          service_fee: trip.offered_price - driverEarnings,
+          service_fee_formatted: formatThaiBaht(trip.offered_price - driverEarnings),
+          request_date: formatDisplayDate(trip.request_time),
+          request_time: formatTimeString(trip.request_time)
+        };
+      });
+  
+      // Get total count for pagination
+      const countSql = `
+        SELECT COUNT(*) AS total
+        FROM servicerequests r
+        JOIN driveroffers o ON r.offer_id = o.offer_id
+        WHERE o.driver_id = ?
+        AND r.status = 'completed'
+      `;
+  
+      const countResult = await db.query(countSql, [driver_id]);
+      const total = countResult[0].total;
+  
+      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+        earnings: formattedEarnings,
+        pagination: {
+          limit,
+          offset,
+          total,
+          total_pages: Math.ceil(total / limit)
+        }
+      }, "ดึงประวัติรายได้สำเร็จ"));
+    } catch (error) {
+      logger.error("Error fetching earnings history", { 
+        driver_id, 
+        error: error.message 
+      });
       
-      return {
-        ...trip,
-        customer_name: `${trip.customer_first_name || ''} ${trip.customer_last_name || ''}`.trim(),
-        total_fare: trip.offered_price,
-        total_fare_formatted: formatThaiBaht(trip.offered_price),
-        driver_earnings: driverEarnings,
-        driver_earnings_formatted: formatThaiBaht(driverEarnings),
-        service_fee: trip.offered_price - driverEarnings,
-        service_fee_formatted: formatThaiBaht(trip.offered_price - driverEarnings),
-        request_date: formatDisplayDate(trip.request_time),
-        request_time: formatTimeString(trip.request_time)
-      };
-    });
-
-    // Get total count for pagination
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM servicerequests r
-      JOIN driveroffers o ON r.offer_id = o.offer_id
-      WHERE o.driver_id = ?
-      AND r.status = 'completed'
-    `;
-
-    const countResult = await db.query(countSql, [driver_id]);
-    const total = countResult[0].total;
-
-    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-      earnings: formattedEarnings,
-      pagination: {
-        limit,
-        offset,
-        total,
-        total_pages: Math.ceil(total / limit)
-      }
-    }, "ดึงประวัติรายได้สำเร็จ"));
-  } catch (error) {
-    logger.error("Error fetching earnings history", { 
-      driver_id, 
-      error: error.message 
-    });
-    
-    throw new DatabaseError(ERROR_MESSAGES.DATABASE.QUERY_ERROR, error);
-  }
-});
+      // Changed from throwing to returning an error response
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(
+        formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR)
+      );
+    }
+  });
 
 /**
  * Get earnings breakdown by time periods

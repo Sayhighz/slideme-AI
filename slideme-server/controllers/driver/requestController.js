@@ -486,89 +486,100 @@ export const notifyArrival = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 export const getRequestHistory = asyncHandler(async (req, res) => {
-  const { driver_id } = req.params;
-  const limit = parseInt(req.query.limit) || 20;
-  const offset = parseInt(req.query.offset) || 0;
-  const status = req.query.status; // 'completed', 'cancelled', or all if not specified
-
-  if (!driver_id) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
-  }
-
-  // Build query conditions
-  let conditions = ["o.driver_id = ?"];
-  const params = [driver_id];
-
-  if (status) {
-    if (status === REQUEST_STATUS.COMPLETED || status === REQUEST_STATUS.CANCELLED) {
-      conditions.push("s.status = ?");
-      params.push(status);
-    } else {
-      conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
+    const { driver_id } = req.params;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = parseInt(req.query.offset) || 0;
+    const status = req.query.status; // 'completed', 'cancelled', or all if not specified
+  
+    if (!driver_id) {
+      throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['driver_id']);
     }
-  } else {
-    conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
-  }
-
-  // Add pagination parameters
-  params.push(limit, offset);
-
-  const sql = `
-    SELECT 
-      s.request_id,
-      s.location_from,
-      s.location_to,
-      s.status,
-      s.request_time,
-      o.offered_price,
-      v.vehicletype_name,
-      c.first_name AS customer_first_name,
-      c.last_name AS customer_last_name,
-      (SELECT AVG(rating) FROM reviews WHERE request_id = s.request_id AND driver_id = o.driver_id) AS rating
-    FROM servicerequests s
-    JOIN driveroffers o ON s.offer_id = o.offer_id
-    JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
-    JOIN customers c ON s.customer_id = c.customer_id
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY s.request_time DESC
-    LIMIT ? OFFSET ?
-  `;
-
-  // Count total for pagination
-  const countSql = `
-    SELECT COUNT(*) AS total
-    FROM servicerequests s
-    JOIN driveroffers o ON s.offer_id = o.offer_id
-    WHERE ${conditions.join(" AND ")}
-  `;
-
-  // Remove pagination parameters for count
-  const countParams = params.slice(0, -2);
-
-  const [requests, countResult] = await Promise.all([
-    db.query(sql, params),
-    db.query(countSql, countParams)
-  ]);
-
-  // Format response
-  const history = requests.map(request => ({
-    ...request,
-    rating: request.rating ? parseFloat(request.rating).toFixed(1) : null,
-    request_date: formatDisplayDate(request.request_time),
-    request_time: formatTimeString(request.request_time)
-  }));
-
-  return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-    Result: history,
-    Count: history.length,
-    Total: countResult[0].total,
-    Pagination: {
-      limit,
-      offset,
-      totalPages: Math.ceil(countResult[0].total / limit)
+  
+    try {
+      // Build query conditions
+      let conditions = ["o.driver_id = ?"];
+      const params = [driver_id];
+  
+      if (status) {
+        if (status === REQUEST_STATUS.COMPLETED || status === REQUEST_STATUS.CANCELLED) {
+          conditions.push("s.status = ?");
+          params.push(status);
+        } else {
+          conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
+        }
+      } else {
+        conditions.push(`s.status IN ('${REQUEST_STATUS.COMPLETED}', '${REQUEST_STATUS.CANCELLED}')`);
+      }
+  
+      // Build the main query
+      let sql = `
+        SELECT 
+          s.request_id,
+          s.location_from,
+          s.location_to,
+          s.status,
+          s.request_time,
+          o.offered_price,
+          v.vehicletype_name,
+          c.first_name AS customer_first_name,
+          c.last_name AS customer_last_name,
+          (SELECT AVG(rating) FROM reviews WHERE request_id = s.request_id AND driver_id = o.driver_id) AS rating
+        FROM servicerequests s
+        JOIN driveroffers o ON s.offer_id = o.offer_id
+        JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+        JOIN customers c ON s.customer_id = c.customer_id
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY s.request_time DESC
+      `;
+  
+      // Count total for pagination
+      const countSql = `
+        SELECT COUNT(*) AS total
+        FROM servicerequests s
+        JOIN driveroffers o ON s.offer_id = o.offer_id
+        WHERE ${conditions.join(" AND ")}
+      `;
+  
+      // Execute count query with parameters
+      const countResult = await db.query(countSql, params);
+      const total = countResult[0].total;
+  
+      // Add LIMIT and OFFSET directly to the SQL string instead of as parameters
+      sql += ` LIMIT ${limit} OFFSET ${offset}`;
+  
+      // Execute main query with parameters
+      const requests = await db.query(sql, params);
+  
+      // Format response
+      const history = requests.map(request => ({
+        ...request,
+        rating: request.rating ? parseFloat(request.rating).toFixed(1) : null,
+        request_date: formatDisplayDate(request.request_time),
+        request_time: formatTimeString(request.request_time)
+      }));
+  
+      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+        Result: history,
+        Count: history.length,
+        Total: total,
+        Pagination: {
+          limit,
+          offset,
+          totalPages: Math.ceil(total / limit)
+        }
+      }));
+    } catch (error) {
+      logger.error('Error fetching request history', { 
+        driver_id,
+        status,
+        error: error.message 
+      });
+      
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(
+        formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR)
+      );
     }
-  }));
-});
+  });
 
 /**
  * Get customer information for a specific request

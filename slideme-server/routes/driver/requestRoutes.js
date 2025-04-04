@@ -234,7 +234,7 @@ router.post('/notify-arrival', notifyArrival);
 router.get('/history/:driver_id', getRequestHistory);
 
 /**
- * @swagger
+ * @swagger3
  * /api/v1/driver/request/customer-info:
  *   get:
  *     summary: ดึงข้อมูลลูกค้า

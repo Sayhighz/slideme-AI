@@ -320,98 +320,122 @@ export const getRequestDetails = asyncHandler(async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+/**
+ * Get customer's service request history
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+/**
+ * Get customer's service request history
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
 export const getRequestHistory = asyncHandler(async (req, res) => {
-  const { customer_id, status, limit, offset } = req.query;
-
-  if (!customer_id) {
-    throw new ValidationError("กรุณาระบุ customer_id");
-  }
-
-  // Build SQL query with status filter if provided
-  let sql = `
-    SELECT 
-      r.request_id,
-      r.status,
-      r.location_from,
-      r.location_to,
-      r.request_time,
-      r.booking_time,
-      v.vehicletype_name,
-      o.offered_price,
-      d.first_name AS driver_first_name,
-      d.last_name AS driver_last_name,
-      d.license_plate,
-      (SELECT rating FROM reviews WHERE request_id = r.request_id) AS rating
-    FROM servicerequests r
-    LEFT JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
-    LEFT JOIN driveroffers o ON r.offer_id = o.offer_id
-    LEFT JOIN drivers d ON o.driver_id = d.driver_id
-    WHERE r.customer_id = ?
-  `;
-
-  const params = [customer_id];
-
-  // Add status filter if provided
-  if (status) {
-    if (!Object.values(REQUEST_STATUS).includes(status)) {
-      throw new ValidationError("สถานะไม่ถูกต้อง");
-    }
-    
-    sql += " AND r.status = ?";
-    params.push(status);
-  }
-
-  // Order by most recent
-  sql += " ORDER BY r.request_time DESC";
-
-  // Get total count for pagination
-  const countSql = `
-    SELECT COUNT(*) AS total 
-    FROM servicerequests 
-    WHERE customer_id = ?${status ? " AND status = ?" : ""}
-  `;
+    const { customer_id, status } = req.query;
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 10;
+    const offset = req.query.offset ? parseInt(req.query.offset, 10) : 0;
   
-  const countResult = await db.query(countSql, params);
-  const total = countResult[0].total;
-
-  // Add pagination if provided
-  if (limit) {
-    sql += " LIMIT ?";
-    params.push(parseInt(limit));
-
-    if (offset) {
-      sql += " OFFSET ?";
-      params.push(parseInt(offset));
+    if (!customer_id) {
+      throw new ValidationError("กรุณาระบุ customer_id");
     }
-  }
-
-  const result = await db.query(sql, params);
-
-  // Format the result
-  const formattedRequests = result.map(request => ({
-    ...request,
-    request_date: formatDisplayDate(request.request_time),
-    request_time: formatTimeString(request.request_time),
-    offered_price_formatted: request.offered_price ? formatThaiBaht(request.offered_price) : null,
-    driver_name: request.driver_first_name ? 
-      `${request.driver_first_name} ${request.driver_last_name || ''}`.trim() : null,
-    rating: request.rating ? parseFloat(request.rating).toFixed(1) : null
-  }));
-
-  return res.status(STATUS_CODES.OK).json(
-    formatSuccessResponse({
-      total,
-      count: formattedRequests.length,
-      requests: formattedRequests,
-      pagination: {
-        limit: limit ? parseInt(limit) : null,
-        offset: offset ? parseInt(offset) : 0,
-        total_pages: limit ? Math.ceil(total / parseInt(limit)) : 1
+  
+    try {
+      // Build SQL query with status filter if provided
+      let sqlQuery = `
+        SELECT 
+          r.request_id,
+          r.status,
+          r.location_from,
+          r.location_to,
+          r.request_time,
+          r.booking_time,
+          v.vehicletype_name,
+          o.offered_price,
+          d.first_name AS driver_first_name,
+          d.last_name AS driver_last_name,
+          d.license_plate,
+          (SELECT rating FROM reviews WHERE request_id = r.request_id) AS rating
+        FROM servicerequests r
+        LEFT JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
+        LEFT JOIN driveroffers o ON r.offer_id = o.offer_id
+        LEFT JOIN drivers d ON o.driver_id = d.driver_id
+        WHERE r.customer_id = ?
+      `;
+  
+      const queryParams = [customer_id];
+  
+      // Add status filter if provided
+      if (status) {
+        if (!Object.values(REQUEST_STATUS).includes(status)) {
+          throw new ValidationError("สถานะไม่ถูกต้อง");
+        }
+        
+        sqlQuery += " AND r.status = ?";
+        queryParams.push(status);
       }
-    }, "ดึงประวัติคำขอบริการสำเร็จ")
-  );
-});
+  
+      // Order by most recent
+      sqlQuery += " ORDER BY r.request_time DESC";
+  
+      // Get total count for pagination
+      let countSql = `
+        SELECT COUNT(*) AS total 
+        FROM servicerequests 
+        WHERE customer_id = ?
+      `;
+      
+      const countParams = [customer_id];
+      
+      if (status) {
+        countSql += " AND status = ?";
+        countParams.push(status);
+      }
+      
+      const countResult = await db.query(countSql, countParams);
+      const total = countResult[0].total;
+  
+      // Add pagination to the main query manually to avoid parameter issues
+      sqlQuery += ` LIMIT ${limit} OFFSET ${offset}`;
+  
+      const result = await db.query(sqlQuery, queryParams);
+  
+      // Format the result
+      const formattedRequests = result.map(request => ({
+        ...request,
+        request_date: formatDisplayDate(request.request_time),
+        request_time: formatTimeString(request.request_time),
+        offered_price_formatted: request.offered_price ? formatThaiBaht(request.offered_price) : null,
+        driver_name: request.driver_first_name ? 
+          `${request.driver_first_name} ${request.driver_last_name || ''}`.trim() : null,
+        rating: request.rating ? parseFloat(request.rating).toFixed(1) : null
+      }));
+  
+      return res.status(STATUS_CODES.OK).json(
+        formatSuccessResponse({
+          total,
+          count: formattedRequests.length,
+          requests: formattedRequests,
+          pagination: {
+            limit,
+            offset,
+            total_pages: limit ? Math.ceil(total / limit) : 1
+          }
+        }, "ดึงประวัติคำขอบริการสำเร็จ")
+      );
+    } catch (error) {
+      logger.error('Error fetching request history', { 
+        customer_id, 
+        status,
+        error: error.message 
+      });
+      
+      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(
+        formatErrorResponse(ERROR_MESSAGES.DATABASE.QUERY_ERROR)
+      );
+    }
+  });
 
+  
 /**
  * Get customer's active request
  * @param {Object} req - Express request object

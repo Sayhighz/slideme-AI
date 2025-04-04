@@ -62,6 +62,9 @@ const router = express.Router();
  *               vehicletype_id:
  *                 type: integer
  *                 example: 1
+ *               customer_id:
+ *                 type: integer
+ *                 example: 1
  *     responses:
  *       200:
  *         description: แก้ไขที่อยู่สำเร็จ

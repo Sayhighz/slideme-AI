@@ -1,18 +1,17 @@
 /**
- * Socket.io configuration
+ * Socket.io service for real-time communication
  */
 import { Server } from 'socket.io';
-import logger from './logger.js';
-import env from './env.js';
+import logger from '../../config/logger.js';
+import env from '../../config/env.js';
 
 /**
- * Configure socket.io server
- * @param {Object} httpServer - HTTP server instance
- * @returns {Object} Socket.io server instance
+ * Configure Socket.io server
+ * @param {Object} server - HTTP server instance
+ * @returns {Object} Configured Socket.io instance
  */
-const configureSocket = (httpServer) => {
-  // Create socket.io server with CORS configuration
-  const io = new Server(httpServer, {
+const configureSocket = (server) => {
+  const io = new Server(server, {
     cors: {
       origin: env.ALLOWED_ORIGINS,
       methods: ['GET', 'POST'],
@@ -20,156 +19,169 @@ const configureSocket = (httpServer) => {
     }
   });
 
-  // Active connections storage
-  // Storing by user type and ID for targeted emissions
+  // Active user connections
   const connections = {
-    customers: {}, // { customer_id: socket_id }
-    drivers: {}    // { driver_id: socket_id }
+    customers: {}, // { customerId: socket.id }
+    drivers: {}    // { driverId: socket.id }
   };
 
   // Handle new connections
   io.on('connection', (socket) => {
     logger.info('New socket connection', { socketId: socket.id });
 
-    // Handle user authentication
+    // Authenticate user
     socket.on('authenticate', (data) => {
       try {
         const { user_type, user_id } = data;
         
         if (!user_type || !user_id) {
-          logger.warn('Invalid authentication data', { socketId: socket.id, data });
+          logger.warn('Invalid authentication data', { socketId: socket.id });
+          socket.emit('error', { message: 'Invalid authentication data' });
           return;
         }
         
-        // Store user connection by type
+        logger.info('User authenticated', { userType: user_type, userId: user_id, socketId: socket.id });
+        
+        // Store connection based on user type
         if (user_type === 'customer') {
           connections.customers[user_id] = socket.id;
-          logger.info('Customer authenticated', { customerId: user_id, socketId: socket.id });
+          socket.join(`customer_${user_id}`);
         } else if (user_type === 'driver') {
           connections.drivers[user_id] = socket.id;
-          logger.info('Driver authenticated', { driverId: user_id, socketId: socket.id });
+          socket.join(`driver_${user_id}`);
         }
         
-        // Join room based on user ID
-        const room = `${user_type}_${user_id}`;
-        socket.join(room);
-        
-        // Acknowledge successful authentication
-        socket.emit('authenticated', { status: true, user_id, user_type });
+        socket.emit('authenticated', { success: true });
       } catch (error) {
-        logger.error('Authentication error', { error: error.message, socketId: socket.id });
+        logger.error('Authentication error', { error: error.message });
         socket.emit('error', { message: 'Authentication failed' });
       }
     });
 
-    // Handle joining a specific request room
-    socket.on('joinRequestRoom', (data) => {
+    // Join request room (for communication between customer and driver)
+    socket.on('joinRequest', (data) => {
       try {
         const { request_id, user_type, user_id } = data;
         
-        if (!request_id) {
-          logger.warn('Invalid request room data', { socketId: socket.id, data });
+        if (!request_id || !user_type || !user_id) {
+          logger.warn('Invalid join request data', { socketId: socket.id });
+          socket.emit('error', { message: 'Invalid join request data' });
           return;
         }
         
-        // Create and join request room
-        const room = `request_${request_id}`;
-        socket.join(room);
+        // Join request room
+        const roomName = `request_${request_id}`;
+        socket.join(roomName);
         
-        logger.info('Joined request room', { 
-          requestId: request_id, 
-          userType: user_type, 
-          userId: user_id, 
-          socketId: socket.id 
-        });
+        logger.info('User joined request room', { requestId: request_id, userType: user_type, userId: user_id });
         
-        // Notify room about new joiner
-        socket.to(room).emit('userJoined', { user_type, user_id });
+        // Notify room about new member
+        socket.to(roomName).emit('userJoined', { user_type, user_id });
         
-        // Acknowledge successful join
-        socket.emit('joinedRequestRoom', { status: true, request_id });
+        // Confirm join
+        socket.emit('joinedRequest', { success: true, request_id });
       } catch (error) {
-        logger.error('Join request room error', { error: error.message, socketId: socket.id });
+        logger.error('Join request error', { error: error.message });
         socket.emit('error', { message: 'Failed to join request room' });
       }
     });
 
-    // Handle private messages between users
-    socket.on('sendMessage', (data) => {
+    // Handle chat messages
+    socket.on('chatMessage', (data) => {
       try {
-        const { request_id, sender_id, sender_type, recipient_id, recipient_type, message } = data;
+        const { request_id, sender_type, sender_id, message } = data;
         
-        if (!request_id || !sender_id || !sender_type || !recipient_id || !recipient_type || !message) {
-          logger.warn('Invalid message data', { socketId: socket.id, data });
+        if (!request_id || !sender_type || !sender_id || !message) {
+          logger.warn('Invalid chat message data', { socketId: socket.id });
+          socket.emit('error', { message: 'Invalid chat message data' });
           return;
-        }
-        
-        // Get recipient's socket ID
-        let recipientSocketId;
-        
-        if (recipient_type === 'customer') {
-          recipientSocketId = connections.customers[recipient_id];
-        } else if (recipient_type === 'driver') {
-          recipientSocketId = connections.drivers[recipient_id];
         }
         
         // Create message object
         const messageObj = {
           request_id,
-          sender_id,
           sender_type,
-          recipient_id,
-          recipient_type,
+          sender_id,
           message,
           timestamp: new Date().toISOString()
         };
         
-        // Send to request room for all participants
-        const room = `request_${request_id}`;
-        io.to(room).emit('newMessage', messageObj);
+        // Send to request room
+        const roomName = `request_${request_id}`;
+        io.to(roomName).emit('newMessage', messageObj);
         
-        // If recipient is not in the room, send directly
-        if (recipientSocketId && !io.sockets.adapter.rooms.get(room)?.has(recipientSocketId)) {
-          io.to(recipientSocketId).emit('newMessage', messageObj);
+        logger.info('Chat message sent', { requestId: request_id, senderType: sender_type, senderId: sender_id });
+      } catch (error) {
+        logger.error('Chat message error', { error: error.message });
+        socket.emit('error', { message: 'Failed to send chat message' });
+      }
+    });
+
+    // Update driver location
+    socket.on('updateLocation', (data) => {
+      try {
+        const { driver_id, latitude, longitude } = data;
+        
+        if (!driver_id || !latitude || !longitude) {
+          logger.warn('Invalid location update data', { socketId: socket.id });
+          socket.emit('error', { message: 'Invalid location update data' });
+          return;
         }
         
-        logger.info('Message sent', { 
-          requestId: request_id, 
-          senderId: sender_id, 
-          recipientId: recipient_id 
+        // Broadcast location update to relevant connections
+        // For active requests, find customer and send location update
+        socket.broadcast.emit('driverLocationUpdate', {
+          driver_id,
+          latitude,
+          longitude,
+          timestamp: new Date().toISOString()
         });
+        
+        logger.info('Driver location updated', { driverId: driver_id, latitude, longitude });
       } catch (error) {
-        logger.error('Send message error', { error: error.message, socketId: socket.id });
-        socket.emit('error', { message: 'Failed to send message' });
+        logger.error('Location update error', { error: error.message });
+        socket.emit('error', { message: 'Failed to update location' });
       }
     });
 
     // Handle disconnection
     socket.on('disconnect', () => {
       try {
-        // Remove socket from connections
-        for (const customerId in connections.customers) {
-          if (connections.customers[customerId] === socket.id) {
+        // Find and remove disconnected user
+        let disconnectedUser = { type: null, id: null };
+        
+        // Check if a customer disconnected
+        for (const [customerId, socketId] of Object.entries(connections.customers)) {
+          if (socketId === socket.id) {
             delete connections.customers[customerId];
-            logger.info('Customer disconnected', { customerId, socketId: socket.id });
+            disconnectedUser = { type: 'customer', id: customerId };
             break;
           }
         }
         
-        for (const driverId in connections.drivers) {
-          if (connections.drivers[driverId] === socket.id) {
-            delete connections.drivers[driverId];
-            logger.info('Driver disconnected', { driverId, socketId: socket.id });
-            break;
+        // Check if a driver disconnected
+        if (!disconnectedUser.type) {
+          for (const [driverId, socketId] of Object.entries(connections.drivers)) {
+            if (socketId === socket.id) {
+              delete connections.drivers[driverId];
+              disconnectedUser = { type: 'driver', id: driverId };
+              break;
+            }
           }
         }
+        
+        if (disconnectedUser.type) {
+          logger.info('User disconnected', { userType: disconnectedUser.type, userId: disconnectedUser.id });
+        } else {
+          logger.info('Socket disconnected', { socketId: socket.id });
+        }
       } catch (error) {
-        logger.error('Disconnect error', { error: error.message, socketId: socket.id });
+        logger.error('Disconnect handling error', { error: error.message });
       }
     });
   });
 
-  // Utility methods for emitting events
+  // Add utility methods to io object for server-initiated events
 
   /**
    * Send notification to a specific customer
@@ -179,12 +191,14 @@ const configureSocket = (httpServer) => {
    */
   io.notifyCustomer = (customerId, event, data) => {
     const socketId = connections.customers[customerId];
+    
     if (socketId) {
       io.to(socketId).emit(event, data);
       logger.info('Notification sent to customer', { customerId, event });
       return true;
     }
-    logger.warn('Customer not connected for notification', { customerId, event });
+    
+    logger.info('Customer not connected for notification', { customerId, event });
     return false;
   };
 
@@ -196,12 +210,14 @@ const configureSocket = (httpServer) => {
    */
   io.notifyDriver = (driverId, event, data) => {
     const socketId = connections.drivers[driverId];
+    
     if (socketId) {
       io.to(socketId).emit(event, data);
       logger.info('Notification sent to driver', { driverId, event });
       return true;
     }
-    logger.warn('Driver not connected for notification', { driverId, event });
+    
+    logger.info('Driver not connected for notification', { driverId, event });
     return false;
   };
 
@@ -212,38 +228,70 @@ const configureSocket = (httpServer) => {
    * @param {Object} data - Event data
    */
   io.notifyRequestParticipants = (requestId, event, data) => {
-    const room = `request_${requestId}`;
-    io.to(room).emit(event, data);
+    const roomName = `request_${requestId}`;
+    io.to(roomName).emit(event, data);
     logger.info('Notification sent to request participants', { requestId, event });
     return true;
   };
 
   /**
-   * Send notification to all active drivers
+   * Send notification to all connected drivers
    * @param {string} event - Event name
    * @param {Object} data - Event data
+   * @returns {number} Number of drivers notified
    */
   io.notifyAllDrivers = (event, data) => {
-    for (const driverId in connections.drivers) {
-      const socketId = connections.drivers[driverId];
-      io.to(socketId).emit(event, data);
+    const driverCount = Object.keys(connections.drivers).length;
+    
+    if (driverCount > 0) {
+      for (const socketId of Object.values(connections.drivers)) {
+        io.to(socketId).emit(event, data);
+      }
+      
+      logger.info('Notification sent to all drivers', { driverCount, event });
     }
-    logger.info('Notification sent to all drivers', { event, driverCount: Object.keys(connections.drivers).length });
-    return true;
+    
+    return driverCount;
   };
 
   /**
-   * Get active connections count
-   * @returns {Object} Active connections count by type
+   * Notify about driver location updates
+   * @param {number} driverId - Driver ID
+   * @param {Object} locationData - Location data with latitude, longitude, etc.
+   * @returns {boolean} Whether notification was sent
    */
-  io.getConnectionsCount = () => {
+  io.notifyDriverLocationUpdate = (driverId, locationData) => {
+    try {
+      // Broadcast to all connected clients - this could be optimized to only send to relevant customers
+      io.emit('driverLocationUpdate', {
+        driver_id: driverId,
+        ...locationData,
+        timestamp: locationData.timestamp || new Date().toISOString()
+      });
+      
+      logger.info('Driver location update broadcast', { driverId });
+      return true;
+    } catch (error) {
+      logger.error('Error broadcasting driver location', { 
+        driverId, 
+        error: error.message 
+      });
+      return false;
+    }
+  };
+
+  /**
+   * Get connection statistics
+   * @returns {Object} Connection statistics
+   */
+  io.getConnectionStats = () => {
     return {
-      customers: Object.keys(connections.customers).length,
-      drivers: Object.keys(connections.drivers).length,
-      total: Object.keys(connections.customers).length + Object.keys(connections.drivers).length
+      totalConnections: Object.keys(connections.customers).length + Object.keys(connections.drivers).length,
+      customerConnections: Object.keys(connections.customers).length,
+      driverConnections: Object.keys(connections.drivers).length
     };
   };
-  
+
   return io;
 };
 

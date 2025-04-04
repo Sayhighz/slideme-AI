@@ -11,7 +11,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/v1//driver/earning/total:
+ * /api/v1/driver/earning/total:
  *   get:
  *     summary: ดึงรายได้รวม
  *     description: | 
@@ -42,7 +42,7 @@ router.get('/total', getTotalEarnings);
 
 /**
  * @swagger
- * /api/v1//driver/earning/history:
+ * /api/v1/driver/earning/history:
  *   get:
  *     summary: ดึงประวัติรายได้
  *     description: | 
@@ -79,7 +79,7 @@ router.get('/history', getEarningsHistory);
 
 /**
  * @swagger
- * /api/v1//driver/earning/breakdown:
+ * /api/v1/driver/earning/breakdown:
  *   get:
  *     summary: ดึงข้อมูลรายได้แบบแยกตามช่วงเวลา
  *     description: | 
@@ -104,7 +104,7 @@ router.get('/breakdown', getEarningsBreakdown);
 
 /**
  * @swagger
- * /api/v1//driver/earning/today:
+ * /api/v1/driver/earning/today:
  *   get:
  *     summary: ดึงรายได้วันนี้
  *     description: | 

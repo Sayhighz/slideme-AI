@@ -1,6 +1,6 @@
-import mysql from 'mysql2';
+import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
-import { logError } from '../utils/errors/errorHandler.js';
+import logger from '../config/logger.js';
 
 // Load environment variables
 dotenv.config();
@@ -15,112 +15,114 @@ const dbConfig = {
   waitForConnections: true,
   queueLimit: 0
 };
-// console.log(dbConfig)
 
 // Create connection pool
 const pool = mysql.createPool(dbConfig);
 
 /**
  * Test database connection
- * @param {function} callback - Callback function to handle success or error
+ * @returns {Promise<boolean>} Connection status
  */
-const testConnection = (callback) => {
-  pool.getConnection((err, connection) => {
-    if (err) {
-      logError(err, 'Database Connection');
-      console.error('❌ Failed to connect to the database:', err.message);
-      return callback(false);
-    }
-    console.log('✅ Connected to MySQL database successfully');
+const testConnection = async () => {
+  try {
+    const connection = await pool.getConnection();
     connection.release();
-    callback(true);
-  });
+    logger.info('✅ Connected to MySQL database successfully');
+    return true;
+  } catch (err) {
+    logger.error('❌ Failed to connect to the database', { error: err.message });
+    return false;
+  }
 };
 
 /**
  * Execute SQL query
  * @param {string} sql - SQL query
  * @param {Array} params - Query parameters
- * @param {function} callback - Callback function to handle results or error
+ * @returns {Promise<Array>} Query results
  */
-const query = (sql, params = [], callback) => {
-  pool.execute(sql, params, (err, results) => {
-    if (err) {
-      logError(err, 'Database Query');
-      return callback(err, null);
-    }
-    callback(null, results);
-  });
+const query = async (sql, params = []) => {
+  try {
+    // Ensure all parameters are converted to the right type
+    const safeParams = params.map(param => 
+      param === undefined ? null : 
+      param === '' ? null : 
+      param
+    );
+
+    const [rows] = await pool.execute(sql, safeParams);
+    return rows;
+  } catch (err) {
+    logger.error('Database Query Error', { 
+      sql, 
+      params, 
+      error: err.message,
+      // Include additional context to help debugging
+      errorCode: err.code,
+      sqlState: err.sqlState,
+      originalStack: err.stack 
+    });
+    throw err;
+  }
 };
 
 /**
  * Begin a transaction
- * @param {function} callback - Callback function to handle connection or error
+ * @returns {Promise<Connection>} Database connection with active transaction
  */
-const beginTransaction = (callback) => {
-  pool.getConnection((err, connection) => {
-    if (err) {
-      logError(err, 'Begin Transaction');
-      return callback(err, null);
-    }
-    connection.beginTransaction((err) => {
-      if (err) {
-        logError(err, 'Begin Transaction');
-        connection.release();
-        return callback(err, null);
-      }
-      callback(null, connection);
-    });
-  });
+const beginTransaction = async () => {
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
+  return connection;
 };
 
 /**
  * Commit a transaction
- * @param {Object} connection - Connection with active transaction
- * @param {function} callback - Callback function to handle commit or error
+ * @param {Connection} connection - Connection with active transaction
  */
-const commitTransaction = (connection, callback) => {
-  connection.commit((err) => {
-    if (err) {
-      logError(err, 'Commit Transaction');
-      connection.release();
-      return callback(err);
-    }
+const commitTransaction = async (connection) => {
+  try {
+    await connection.commit();
     connection.release();
-    callback(null);
-  });
+  } catch (err) {
+    logger.error('Commit Transaction Error', { error: err.message });
+    throw err;
+  }
 };
 
 /**
  * Rollback a transaction
- * @param {Object} connection - Connection with active transaction
- * @param {function} callback - Callback function to handle rollback or error
+ * @param {Connection} connection - Connection with active transaction
  */
-const rollbackTransaction = (connection, callback) => {
-  connection.rollback((err) => {
-    if (err) {
-      logError(err, 'Rollback Transaction');
-    }
+const rollbackTransaction = async (connection) => {
+  try {
+    await connection.rollback();
     connection.release();
-    callback(err);
-  });
+  } catch (err) {
+    logger.error('Rollback Transaction Error', { error: err.message });
+    throw err;
+  }
 };
 
 /**
  * Execute SQL query within a transaction
- * @param {Object} connection - Connection with active transaction
+ * @param {Connection} connection - Connection with active transaction
  * @param {string} sql - SQL query
  * @param {Array} params - Query parameters
- * @param {function} callback - Callback function to handle results or error
+ * @returns {Promise<Array>} Query results
  */
-const transactionQuery = (connection, sql, params = [], callback) => {
-  connection.execute(sql, params, (err, results) => {
-    if (err) {
-      logError(err, 'Transaction Query');
-      return callback(err, null);
-    }
-    callback(null, results);
-  });
+const transactionQuery = async (connection, sql, params = []) => {
+  try {
+    const [rows] = await connection.execute(sql, params);
+    return rows;
+  } catch (err) {
+    logger.error('Transaction Query Error', { 
+      sql, 
+      params, 
+      error: err.message 
+    });
+    throw err;
+  }
 };
 
 export default {

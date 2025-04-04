@@ -101,9 +101,9 @@ app.use(errorHandler);
 configureSocket(server);
 
 const startServer = async () => {
-//   try {
-    // const connected = await db.testConnection();
-    // if (!connected) throw new Error('DB connection failed');
+  try {
+    const connected = await db.testConnection();
+    if (!connected) throw new Error('DB connection failed');
 
     const PORT = process.env.PORT || 4000;
     server.listen(PORT, () => {
@@ -114,10 +114,10 @@ const startServer = async () => {
       logger.info(`- Customer Routes: ${CUSTOMER_PREFIX}/{auth, request, review, payment, address, profile}`);
       logger.info(`- Driver Routes: ${DRIVER_PREFIX}/{auth, profile, location, request, offer, earning}`);
     });
-//   } catch (error) {
-//     logger.error('Failed to start server', { error: error.message });
-//     process.exit(1);
-//   }
+  } catch (error) {
+    logger.error('Failed to start server', { error: error.message });
+    process.exit(1);
+  }
 };
 
 startServer();
