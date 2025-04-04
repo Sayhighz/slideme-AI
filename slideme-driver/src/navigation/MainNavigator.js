@@ -6,21 +6,21 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import tw from 'twrnc';
 
 // Screens
-import HomeScreen from '../screens/home/HomeScreen';
-import JobsScreen from '../screens/job/JobsScreen';
+import HomeScreen from '../screens/home/HomeScreen.js';
+import JobsScreen from '../screens/job/JobsScreen.js';
 import JobDetailScreen from '../screens/job/JobDetailScreen';
 import JobWorkingPickupScreen from '../screens/job/JobWorkingPickupScreen';
 import JobWorkingDropoffScreen from '../screens/job/JobWorkingDropoffScreen';
-import CarUploadPickUpConfirmationScreen from '../screens/job/CarUploadPickUpConfirmationScreen';
-import CarUploadDropOffConfirmationScreen from '../screens/job/CarUploadDropOffConfirmationScreen';
-import HistoryScreen from '../screens/history/HistoryScreen';
-import ProfileScreen from '../screens/profile/ProfileScreen';
-import PersonalInfoScreen from '../screens/profile/PersonalInfoScreen';
-import EditInfoScreen from '../screens/profile/EditInfoScreen';
-import ChatScreen from '../screens/chat/ChatScreen';
+import CarUploadPickUpConfirmationScreen from '../screens/job/CarUploadPickupConfirmationScreen.js';
+import CarUploadDropOffConfirmationScreen from '../screens/job/CarUploadDropoffConfirmationScreen.js';
+import HistoryScreen from '../screens/history/HistoryScreen.js';
+import ProfileScreen from '../screens/profile/ProfileScreen.js';
+import PersonalInfoScreen from '../screens/profile/PersonalInfoScreen.js';
+import EditInfoScreen from '../screens/profile/EditInfoScreen.js';
+import ChatScreen from '../screens/chat/ChatScreen.js';
 
 // Components
-import DriverLocationTracker from '../components/common/DriverLocationTracker';
+import DriverLocationTracker from '../components/common/DriverLocationTracker.js';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();

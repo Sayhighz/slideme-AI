@@ -1,5 +1,6 @@
 import * as Location from "expo-location";
 import { postRequest } from "./api";
+import { API_ENDPOINTS } from "../constants";
 
 // ขออนุญาตการเข้าถึงตำแหน่ง
 export const requestLocationPermission = async () => {
@@ -31,7 +32,7 @@ export const getCurrentLocation = async () => {
 // อัปเดตตำแหน่งคนขับ
 export const updateDriverLocation = async (driverId, latitude, longitude) => {
   try {
-    const response = await postRequest("/driver/update_location", {
+    const response = await postRequest(API_ENDPOINTS.DRIVER.LOCATION.UPDATE, {
       driver_id: driverId,
       current_latitude: latitude,
       current_longitude: longitude

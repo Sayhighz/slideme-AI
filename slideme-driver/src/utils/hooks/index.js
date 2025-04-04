@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { getRequest } from '../../services/api';
+import { API_ENDPOINTS } from '../../constants';
 
 // Hook สำหรับเรียกใช้งาน location
 export const useLocation = () => {
@@ -35,8 +36,8 @@ export const useTodayProfit = (driverId) => {
       const fetchProfitToday = async () => {
         try {
           setLoading(true);
-          const data = await getRequest(`/driver/profitToday?driver_id=${driverId}`);
-          setProfitToday(data.Status && data.Result.length > 0 ? data.Result[0].profit_today : 0);
+          const data = await getRequest(`${API_ENDPOINTS.DRIVER.EARNINGS.TODAY}?driver_id=${driverId}&period=day`);
+          setProfitToday(data.Status && data.profit_today ? data.profit_today : 0);
           setError(null);
         } catch (error) {
           console.error("เกิดข้อผิดพลาดขณะดึงข้อมูลรายได้วันนี้:", error);
@@ -67,8 +68,8 @@ export const useDriverScore = (driverId) => {
       const fetchDriverScore = async () => {
         try {
           setLoading(true);
-          const data = await getRequest(`/driver/score?driver_id=${driverId}`);
-          setDriverScore(data.Status && data.Result.length > 0 ? data.Result[0].Score : 0);
+          const data = await getRequest(`${API_ENDPOINTS.DRIVER.PROFILE.GET_STATS}/${driverId}`);
+          setDriverScore(data.Status && data.average_rating ? data.average_rating : 0);
           setError(null);
         } catch (error) {
           console.error("เกิดข้อผิดพลาดขณะดึงคะแนนของผู้ขับ:", error);

@@ -31,7 +31,7 @@ const HomeHeader = ({ userData }) => {
             style={tw`mr-1`}
           />
           <Text style={[tw`text-lg text-gray-700`, { fontFamily: 'Mitr-Regular' }]}>
-            {driverScore ? driverScore.toFixed(1) : "0.0"}
+            {driverScore ? driverScore : "0.0"}
           </Text>
         </View>
       </View>

@@ -16,6 +16,7 @@ const AppNavigator = () => {
       try {
         const user = await checkAuth();
         setUserData(user);
+        console.log('User data:', user);
       } catch (error) {
         console.error('Auth check error:', error);
       } finally {
