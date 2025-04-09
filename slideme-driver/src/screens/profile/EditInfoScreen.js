@@ -44,9 +44,9 @@ const EditInfoScreen = ({ navigation, route }) => {
       }
 
       try {
-        const response = await getRequest(`driver/getinfo?driver_id=${userData.driver_id}`);
-        if (response && response.Status && response.Result.length > 0) {
-          const user = response.Result[0];
+        const response = await getRequest(`${API_ENDPOINTS.DRIVER.PROFILE.GET}/${userData.driver_id}`);
+        if (response.Status) {
+          const user = response;
           setFormData({
             id_expiry_date: formatDate(user.id_expiry_date) || '',
             email: user.email || '',
@@ -116,7 +116,7 @@ const EditInfoScreen = ({ navigation, route }) => {
         ...formData
       };
 
-      const response = await postRequest('driver/edit_profile', requestData);
+      const response = await postRequest(API_ENDPOINTS.DRIVER.PROFILE.UPDATE, requestData);
 
       if (response && response.Status) {
         Alert.alert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว', [
@@ -221,25 +221,6 @@ const EditInfoScreen = ({ navigation, route }) => {
               onChangeText={(text) => setFormData(prev => ({ ...prev, license_plate: text }))}
             />
 
-            <Text 
-              style={[
-                tw`text-gray-700 mb-2`, 
-                { fontFamily: FONTS.FAMILY.REGULAR }
-              ]}
-            >
-              ที่อยู่
-            </Text>
-            <TextInput
-              style={[
-                tw`border border-gray-300 rounded-lg p-3 mb-4 h-24`,
-                { fontFamily: FONTS.FAMILY.REGULAR }
-              ]}
-              placeholder="ที่อยู่ของคุณ"
-              value={formData.address}
-              onChangeText={(text) => setFormData(prev => ({ ...prev, address: text }))}
-              multiline={true}
-              textAlignVertical="top"
-            />
           </View>
         </ScrollView>
 

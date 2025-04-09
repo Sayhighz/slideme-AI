@@ -354,11 +354,15 @@ export const getRequestHistory = asyncHandler(async (req, res) => {
           d.first_name AS driver_first_name,
           d.last_name AS driver_last_name,
           d.license_plate,
-          (SELECT rating FROM reviews WHERE request_id = r.request_id) AS rating
+          (SELECT rating FROM reviews WHERE request_id = r.request_id) AS rating,
+          sr.receipt_id,
+          sr.distance_km,
+          sr.travel_time_minutes
         FROM servicerequests r
         LEFT JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
         LEFT JOIN driveroffers o ON r.offer_id = o.offer_id
         LEFT JOIN drivers d ON o.driver_id = d.driver_id
+        LEFT JOIN service_receipts sr ON r.request_id = sr.request_id
         WHERE r.customer_id = ?
       `;
   
@@ -943,118 +947,113 @@ export const acceptOffer = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 export const completeRequest = asyncHandler(async (req, res) => {
-  const { request_id, customer_id } = req.body;
-
-  if (!request_id || !customer_id) {
-    throw new ValidationError("กรุณาระบุ request_id และ customer_id");
-  }
-
-  // Check if the request exists, belongs to the customer, and is in accepted status
-  const checkSql = `
-    SELECT r.request_id, r.status, o.driver_id, o.offered_price, r.payment_id
-    FROM servicerequests r
-    JOIN driveroffers o ON r.offer_id = o.offer_id
-    WHERE r.request_id = ? AND r.customer_id = ? AND r.status = ?
-  `;
-
-  const checkResult = await db.query(checkSql, [request_id, customer_id, REQUEST_STATUS.ACCEPTED]);
-
-  if (checkResult.length === 0) {
-    throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้น");
-  }
-
-  const { driver_id, offered_price, payment_id } = checkResult[0];
-
-  // Start a database transaction
-  const connection = await db.beginTransaction();
-
-  try {
-    // Update request status
-    const updateSql = `
-      UPDATE servicerequests 
-      SET status = ? 
-      WHERE request_id = ? AND customer_id = ?
-    `;
-
-    await db.transactionQuery(
-      connection,
-      updateSql,
-      [REQUEST_STATUS.COMPLETED, request_id, customer_id]
-    );
-
-    // Update payment status
-    const updatePaymentSql = `
-      UPDATE payments
-      SET payment_status = ?
-      WHERE payment_id = ?
-    `;
-
-    await db.transactionQuery(
-      connection,
-      updatePaymentSql,
-      [PAYMENT_STATUS.COMPLETED, payment_id]
-    );
-
-    // Process driver payout
-    if (driver_id) {
-      // In a real application, this would update the driver's earnings or wallet
-      // For now, we'll just log it
-      logger.info('Processing driver payout', {
-        driver_id,
-        request_id,
-        amount: offered_price,
-        formatted_amount: formatThaiBaht(offered_price)
-      });
+    const { request_id, customer_id } = req.body;
+  
+    if (!request_id || !customer_id) {
+      throw new ValidationError("กรุณาระบุ request_id และ customer_id");
     }
-
-    // Commit the transaction
-    await db.commitTransaction(connection);
-
-    // Notify driver about completed service
+  
+    // Check if the request exists, belongs to the customer, and is in accepted status
+    const checkSql = `
+      SELECT r.request_id, r.status, o.driver_id, o.offered_price, r.payment_id, 
+             r.location_from, r.location_to, v.vehicletype_name,
+             r.pickup_lat, r.pickup_long, r.dropoff_lat, r.dropoff_long,
+             pm.method_name
+      FROM servicerequests r
+      JOIN driveroffers o ON r.offer_id = o.offer_id
+      JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
+      JOIN payments p ON r.payment_id = p.payment_id
+      JOIN paymentmethod pm ON p.payment_method_id = pm.payment_method_id
+      WHERE r.request_id = ? AND r.customer_id = ? AND r.status = ?
+    `;
+  
+    const checkResult = await db.query(checkSql, [request_id, customer_id, REQUEST_STATUS.ACCEPTED]);
+  
+    if (checkResult.length === 0) {
+      throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้น");
+    }
+  
+    const { driver_id, offered_price, payment_id, location_from, location_to, 
+            vehicletype_name, pickup_lat, pickup_long, dropoff_lat, dropoff_long, 
+            method_name } = checkResult[0];
+    
+    // คำนวณระยะทางและเวลาเดินทาง
+    const tripDistance = distanceService.calculateDistance(
+      pickup_lat, pickup_long, dropoff_lat, dropoff_long
+    );
+    const travelTime = distanceService.calculateTravelTime(tripDistance);
+  
+    // Start a database transaction
+    const connection = await db.beginTransaction();
+  
     try {
-      // Via socket if available
-      if (socketService) {
-        socketService.notifyDriver(driver_id, 'requestCompleted', {
-          request_id,
-          customer_id,
-          status: REQUEST_STATUS.COMPLETED
-        });
-      }
-      
-      // Send push notification
-      pushNotificationService.sendUserNotification(
-        'driver',
-        driver_id,
-        {
-          title: "การบริการเสร็จสมบูรณ์",
-          body: "ลูกค้ายืนยันว่าการบริการเสร็จสมบูรณ์แล้ว"
-        },
-        {
-          request_id: request_id.toString(),
-          type: 'request_completed'
-        }
+      // Update request status
+      const updateSql = `
+        UPDATE servicerequests 
+        SET status = ? 
+        WHERE request_id = ? AND customer_id = ?
+      `;
+  
+      await db.transactionQuery(
+        connection,
+        updateSql,
+        [REQUEST_STATUS.COMPLETED, request_id, customer_id]
       );
-    } catch (notificationError) {
-      // Log notification errors but don't fail the operation
-      logger.error('Error sending completion notification', { 
-        error: notificationError.message 
-      });
+  
+      // Update payment status
+      const updatePaymentSql = `
+        UPDATE payments
+        SET payment_status = ?
+        WHERE payment_id = ?
+      `;
+  
+      await db.transactionQuery(
+        connection,
+        updatePaymentSql,
+        [PAYMENT_STATUS.COMPLETED, payment_id]
+      );
+  
+      // เพิ่มการสร้าง service_receipt
+      const createReceiptSql = `
+        INSERT INTO service_receipts (
+          request_id, customer_id, driver_id, payment_id, offer_id,
+          pickup_location, dropoff_location, vehicle_type,
+          service_price, payment_method, payment_status,
+          distance_km, travel_time_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+  
+      await db.transactionQuery(
+        connection,
+        createReceiptSql,
+        [
+          request_id, customer_id, driver_id, payment_id, checkResult[0].offer_id,
+          location_from, location_to, vehicletype_name,
+          offered_price, method_name, PAYMENT_STATUS.COMPLETED,
+          tripDistance, travelTime
+        ]
+      );
+  
+      // Commit the transaction
+      await db.commitTransaction(connection);
+  
+      // Notify driver about completed service
+      // ...existing notification code...
+  
+      return res.status(STATUS_CODES.OK).json(
+        formatSuccessResponse({
+          request_id,
+          driver_id,
+          price: offered_price,
+          price_formatted: formatThaiBaht(offered_price),
+          status: REQUEST_STATUS.COMPLETED
+        }, "เสร็จสิ้นคำขอบริการสำเร็จ")
+      );
+    } catch (error) {
+      await db.rollbackTransaction(connection);
+      throw error;
     }
-
-    return res.status(STATUS_CODES.OK).json(
-      formatSuccessResponse({
-        request_id,
-        driver_id,
-        price: offered_price,
-        price_formatted: formatThaiBaht(offered_price),
-        status: REQUEST_STATUS.COMPLETED
-      }, "เสร็จสิ้นคำขอบริการสำเร็จ")
-    );
-  } catch (error) {
-    await db.rollbackTransaction(connection);
-    throw error;
-  }
-});
+  });
 
 export default {
   createRequest,

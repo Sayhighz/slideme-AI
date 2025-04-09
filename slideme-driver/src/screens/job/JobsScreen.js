@@ -80,6 +80,7 @@ export default function JobsScreen({ route }) {
   });
 
   const handleJobPress = (job) => {
+    // console.log("Selected job:", job);
     const jobDistance = calculateDistance(
       job.pickup_lat, job.pickup_long, job.dropoff_lat, job.dropoff_long
     );
@@ -89,7 +90,7 @@ export default function JobsScreen({ route }) {
       distance: jobDistance,
       origin: job.location_from,
       destination: job.location_to,
-      type: job.vehicle_type,
+      type: job.vehicletype_name,
       message: job.customer_message,
       userData: route.params
     });

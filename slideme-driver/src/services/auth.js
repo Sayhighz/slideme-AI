@@ -1,10 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { postRequest } from "./api";
+import { API_ENDPOINTS } from "../constants";
 
 // ฟังก์ชันสำหรับการล็อกอิน
 export const login = async (phoneNumber, password) => {
     try {
-      const response = await postRequest("/auth/login", { phone_number: phoneNumber, password });
+      const response = await postRequest(API_ENDPOINTS.AUTH.LOGIN, { phone_number: phoneNumber, password });
       
       if (response.Status && response.token) {
         // Extract the user data we want to store
@@ -32,7 +33,7 @@ export const login = async (phoneNumber, password) => {
 // ฟังก์ชันสำหรับการลงทะเบียน
 export const register = async (userData) => {
   try {
-    const response = await postRequest("/auth/register_driver", userData);
+    const response = await postRequest(API_ENDPOINTS.AUTH.REGISTER, userData);
     if (response.Status) {
         return response;
       } else {

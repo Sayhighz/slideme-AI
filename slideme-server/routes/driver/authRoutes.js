@@ -82,6 +82,12 @@ router.post('/login', loginDriver);
  *                 type: string
  *                 format: date
  *                 example: "2030-12-31"
+ *               vehicle_type:
+ *                 type: integer
+ *                 example: 1
+ *               province:
+ *                  type: string
+ *                  example: "กรุงเทพมหานคร"
  *     responses:
  *       201:
  *         description: ลงทะเบียนสำเร็จ

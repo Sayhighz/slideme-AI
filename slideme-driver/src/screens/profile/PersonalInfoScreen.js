@@ -38,9 +38,10 @@ const PersonalInfoScreen = ({ navigation, route }) => {
       }
 
       try {
-        const response = await getRequest(`driver/getinfo?driver_id=${userData.driver_id}`);
-        if (response && response.Status && response.Result.length > 0) {
-          const user = response.Result[0];
+        const response = await getRequest(`${API_ENDPOINTS.DRIVER.PROFILE.GET}/${userData.driver_id}`);
+        // console.log(response);
+        if (response.Status) {
+          const user = response;
           // Format dates if needed
           if (user.id_expiry_date) {
             user.id_expiry_date = formatDate(user.id_expiry_date);
@@ -124,7 +125,7 @@ const PersonalInfoScreen = ({ navigation, route }) => {
                 { fontFamily: FONTS.FAMILY.REGULAR }
               ]}
             >
-              {driverScore ? driverScore.toFixed(1) : "0.0"}
+              {driverScore ? driverScore : "0.0"}
             </Text>
           </View>
         </View>
@@ -225,25 +226,6 @@ const PersonalInfoScreen = ({ navigation, route }) => {
               </Text>
             </View>
 
-            {/* Address */}
-            <View style={tw`flex-row justify-between`}>
-              <Text 
-                style={[
-                  tw`text-gray-500`, 
-                  { fontFamily: FONTS.FAMILY.REGULAR }
-                ]}
-              >
-                ที่อยู่
-              </Text>
-              <Text 
-                style={[
-                  tw`text-gray-700 text-right flex-1 ml-4`, 
-                  { fontFamily: FONTS.FAMILY.REGULAR }
-                ]}
-              >
-                {userInfo?.address || 'ไม่มีข้อมูล'}
-              </Text>
-            </View>
           </View>
 
           {/* Vehicle Information Section */}
@@ -293,7 +275,7 @@ const PersonalInfoScreen = ({ navigation, route }) => {
                   { fontFamily: FONTS.FAMILY.REGULAR }
                 ]}
               >
-                {userInfo?.vehicle_type || 'ไม่พบข้อมูล'}
+                {userInfo?.vehicletype_name || 'ไม่พบข้อมูล'}
               </Text>
             </View>
 

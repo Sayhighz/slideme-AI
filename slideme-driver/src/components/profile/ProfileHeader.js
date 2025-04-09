@@ -34,7 +34,7 @@ const ProfileHeader = ({ userData, onEditPress }) => {
               style={tw`mr-1`}
             />
             <Text style={[tw`text-lg text-gray-700`, { fontFamily: FONTS.FAMILY.REGULAR }]}>
-              {driverScore ? driverScore.toFixed(1) : "0.0"}
+              {driverScore ? driverScore : "0.0"}
             </Text>
           </View>
         </View>

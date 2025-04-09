@@ -8,8 +8,6 @@ import { formatCurrency } from '../../utils/formatters';
 const DriverStatsCard = ({ driverId }) => {
   const [stats, setStats] = useState({
     totalTrips: 0,
-    totalEarnings: 0,
-    completionRate: 0,
     avgRating: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -22,16 +20,15 @@ const DriverStatsCard = ({ driverId }) => {
       }
 
       try {
-        const response = await getRequest(`driver/getinfo?driver_id=${driverId}`);
-        if (response && response.Status && response.Result.length > 0) {
+        const response = await getRequest(`${API_ENDPOINTS.DRIVER.PROFILE.GET_STATS}/${driverId}`);
+        if (response.Status) {
           // In a real app, you might want to fetch more detailed stats
           // For now, we're using placeholder values or assuming the API returns these
-          const driverInfo = response.Result[0];
+          const driverInfo = response;
+          console.log(driverInfo);
           setStats({
-            totalTrips: driverInfo.total_trips || 0,
-            totalEarnings: driverInfo.total_earnings || 0,
-            completionRate: driverInfo.completion_rate || 0,
-            avgRating: driverInfo.avg_rating || 0,
+            totalTrips: driverInfo.completed_trips || 0,
+            avgRating: driverInfo.average_rating || 0,
           });
         }
       } catch (error) {
@@ -75,37 +72,6 @@ const DriverStatsCard = ({ driverId }) => {
           </View>
         </View>
         
-        <View style={tw`w-1/2 p-2`}>
-          <View style={tw`bg-gray-50 p-3 rounded-lg`}>
-            <Text style={[tw`text-gray-500`, { fontFamily: FONTS.FAMILY.REGULAR }]}>
-              รายได้รวม
-            </Text>
-            <Text 
-              style={[
-                tw`text-xl mt-1 text-[${COLORS.PRIMARY}]`, 
-                { fontFamily: FONTS.FAMILY.REGULAR }
-              ]}
-            >
-              {formatCurrency(stats.totalEarnings)}
-            </Text>
-          </View>
-        </View>
-        
-        <View style={tw`w-1/2 p-2`}>
-          <View style={tw`bg-gray-50 p-3 rounded-lg`}>
-            <Text style={[tw`text-gray-500`, { fontFamily: FONTS.FAMILY.REGULAR }]}>
-              อัตราการเสร็จสิ้น
-            </Text>
-            <Text 
-              style={[
-                tw`text-xl mt-1 text-blue-500`, 
-                { fontFamily: FONTS.FAMILY.REGULAR }
-              ]}
-            >
-              {stats.completionRate}%
-            </Text>
-          </View>
-        </View>
         
         <View style={tw`w-1/2 p-2`}>
           <View style={tw`bg-gray-50 p-3 rounded-lg`}>
@@ -118,7 +84,7 @@ const DriverStatsCard = ({ driverId }) => {
                 { fontFamily: FONTS.FAMILY.REGULAR }
               ]}
             >
-              {stats.avgRating.toFixed(1)}
+              {stats.avgRating}
             </Text>
           </View>
         </View>

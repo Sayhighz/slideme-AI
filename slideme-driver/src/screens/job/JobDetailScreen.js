@@ -30,7 +30,7 @@ export default function JobDetailScreen({ route, navigation }) {
 
     setIsSubmitting(true);
     try {
-      const result = await postRequest(API_ENDPOINTS.JOBS.OFFER_PRICE, {
+      const result = await postRequest(API_ENDPOINTS.JOBS.CREATE_OFFER, {
         request_id: requestId,
         driver_id: userData?.driver_id,
         offered_price: parseFloat(offeredPrice.replace(/,/g, "")),

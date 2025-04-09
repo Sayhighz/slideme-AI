@@ -12,6 +12,7 @@ const JobCard = ({ job, onPress }) => {
     formattedPrice, 
     statusInfo 
   } = formatJobDetails(job);
+//   console.log(job)
 
   return (
     <TouchableOpacity 
