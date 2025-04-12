@@ -8,7 +8,12 @@ import { styles } from './src/styles/common';
 export default function App() {
   // โหลดฟอนต์
   const [fontsLoaded] = useFonts({
-    'Mitr-Regular': require('./src/assets/fonts/Mitr-Regular.ttf')
+    'Mitr-Regular': require('./src/assets/fonts/Mitr-Regular.ttf'),
+    'Mitr-Bold': require('./src/assets/fonts/Mitr-Bold.ttf'),
+    'Mitr-Light': require('./src/assets/fonts/Mitr-Light.ttf'),
+    'Mitr-ExtraLight': require('./src/assets/fonts/Mitr-ExtraLight.ttf'),
+    'Mitr-Medium': require('./src/assets/fonts/Mitr-Medium.ttf'),
+    'Mitr-SemiBold': require('./src/assets/fonts/Mitr-SemiBold.ttf')
   });
 
   // แสดง loading screen ระหว่างโหลดฟอนต์

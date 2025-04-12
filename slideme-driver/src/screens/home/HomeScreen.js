@@ -1,238 +1,172 @@
-// HomeScreen.js
-import React, { useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  SafeAreaView, 
   View, 
-  TouchableOpacity, 
-  Text, 
-  Alert,
-  Animated,
-  Dimensions,
+  ScrollView, 
+  SafeAreaView, 
+  RefreshControl, 
+  StatusBar, 
   Platform,
-  StatusBar,
-  ScrollView,
-  RefreshControl
+  Alert,
+  ToastAndroid
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import tw from 'twrnc';
-import { useNavigation } from '@react-navigation/native';
-import * as Haptics from 'expo-haptics';
-import LottieView from 'lottie-react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
-// Import Components
-import HomeHeader from '../../components/home/HomeHeader.js';
-import ProfitDisplay from '../../components/home/ProfitDisplay.js';
-import OffersList from '../../components/home/OffersList.js';
-import AdBanner from '../../components/home/AdBanner.js';
+// Components
+import DriverProfile from '../../components/home/DriverProfile';
+import OffersSection from '../../components/home/OffersSection';
+import PromotionBanner from '../../components/home/PromotionBanner';
+import FindJobButton from '../../components/home/FindJobButton';
 
-const { width, height } = Dimensions.get('window');
+// Services
+import { getRequest } from '../../services/api';
+import { API_ENDPOINTS } from '../../constants';
 
-const HomeScreen = ({ route }) => {
-  const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
-  const { userData = {} } = route.params || {};
-  const [refreshing, setRefreshing] = React.useState(false);
+// Hooks
+import { useTodayProfit, useDriverScore } from '../../utils/hooks';
+import { MESSAGES } from '../../constants';
+
+const HomeScreen = ({ navigation, route }) => {
+  const { userData } = route.params;
+  const [refreshing, setRefreshing] = useState(false);
+  const [offerData, setOfferData] = useState(null);
+  const [loading, setLoading] = useState(true);
   
-  // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(50)).current;
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
-  const buttonAnim = useRef(new Animated.Value(0)).current;
-  
-  // References for components
-  const lottieRef = useRef(null);
+  // Using custom hooks
+  const { profitToday, loading: profitLoading } = useTodayProfit(userData?.driver_id);
+  const { driverScore, loading: scoreLoading } = useDriverScore(userData?.driver_id);
 
-  // Notice array for ad banners 
-  const notices = [
-    { id: 1, image: 'ads1.png' },
-    { id: 2, image: 'ads2.png' },
-    { id: 3, image: 'ads3.png' },
-  ];
-
-  useEffect(() => {
-    // Animation sequence
-    Animated.stagger(150, [
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-      Animated.spring(buttonAnim, {
-        toValue: 1,
-        friction: 4,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    // Play Lottie animation
-    if (lottieRef.current) {
-      lottieRef.current.play();
-    }
-  }, []);
-
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // Simulate a refresh with slight delay
-    setTimeout(() => setRefreshing(false), 1500);
-  }, []);
-
-  const handleJobSearch = () => {
-    // Trigger haptic feedback for button press
-    if (Platform.OS === 'ios') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-
-    if (userData?.driver_id) {
-      // Animate the button press
-      Animated.sequence([
-        Animated.timing(buttonAnim, {
-          toValue: 0.9,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(buttonAnim, {
-          toValue: 1,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        navigation.navigate('JobsScreen', { driver_id: userData.driver_id });
-      });
-    } else {
-      Alert.alert('ข้อผิดพลาด', 'ไม่พบข้อมูลผู้ใช้');
+  // ฟังก์ชันแสดงข้อความแจ้งเตือน (สำหรับ Android)
+  const showToast = (message) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
     }
   };
 
+  // Fetch pending offers
+  const fetchOffers = async () => {
+    try {
+      setLoading(true);
+      const response = await getRequest(`${API_ENDPOINTS.JOBS.GET_OFFERS}?driver_id=${userData?.driver_id}&status=pending`);
+      
+      if (response && response.Status) {
+        setOfferData(response); // เก็บข้อมูลทั้งหมดจาก API
+      } else {
+        // กรณีมี response แต่ Status ไม่เป็น true
+        setOfferData(null);
+        console.error('Error fetching offers:', response?.Message || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error fetching offers:', error);
+      setOfferData(null);
+      Alert.alert('ข้อผิดพลาด', MESSAGES.ERRORS.CONNECTION);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (userData?.driver_id) {
+        fetchOffers();
+      }
+    }, [userData])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchOffers();
+    setRefreshing(false);
+  };
+
+  // Navigate to JobDetail
+  const handleOfferPress = (offer) => {
+    navigation.navigate('JobDetail', { 
+      offer, 
+      userData,
+      fromScreen: 'Home'
+    });
+  };
+
+  // ฟังก์ชันหลังจากยกเลิกข้อเสนอ
+  const handleOfferCancel = async (offerId) => {
+    // ดึงข้อมูลใหม่หลังจากยกเลิกข้อเสนอ
+    await fetchOffers();
+    
+    // แสดงข้อความแจ้งเตือน
+    if (Platform.OS === 'ios') {
+      Alert.alert("สำเร็จ", "ยกเลิกข้อเสนอเรียบร้อยแล้ว");
+    } else {
+      showToast("ยกเลิกข้อเสนอเรียบร้อยแล้ว");
+    }
+  };
+
+  // Navigate to JobsScreen
+  const handleFindJobPress = () => {
+    navigation.navigate('JobsScreen', { userData });
+  };
+
+  // ตรวจสอบว่าควรปิดปุ่มค้นหางานหรือไม่
+  const pendingOffersCount = offerData?.Count || 0;
+  const disableFindJob = pendingOffersCount >= 3;
+
+  // ข้อความแสดงเมื่อปุ่มค้นหางานถูกปิด
+  const findJobDisabledMessage = "คุณมีข้อเสนอที่รอการตอบรับมากกว่า 3 รายการ กรุณาจัดการข้อเสนอที่มีอยู่ก่อน";
+
   return (
-    <SafeAreaView style={[
-      tw`flex-1 bg-white`,
-      { paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 }
-    ]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+    <SafeAreaView style={tw`flex-1 bg-white`}>
+      <StatusBar 
+        backgroundColor="#FFFFFF" 
+        barStyle="dark-content" 
+        translucent={Platform.OS === 'android'}
+      />
       
       <ScrollView
+        style={tw`flex-1`}
+        contentContainerStyle={tw`pb-20`}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={tw`pb-24`}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#60B876']}
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            colors={['#60B876']} 
             tintColor="#60B876"
           />
         }
       >
-        {/* Header with animation */}
-        <Animated.View 
-          style={[
-            tw`w-full`,
-            { 
-              opacity: fadeAnim,
-              transform: [{ translateY: translateY }] 
-            }
-          ]}
-        >
-          <HomeHeader userData={userData} />
-        </Animated.View>
-
-        {/* Profit Display with animation */}
-        <Animated.View 
-          style={[
-            tw`w-full`,
-            { 
-              opacity: fadeAnim,
-              transform: [
-                { translateY: translateY },
-                { scale: scaleAnim }
-              ] 
-            }
-          ]}
-        >
-          <ProfitDisplay driverId={userData?.driver_id} />
-        </Animated.View>
-
-        {/* Offers List with animation */}
-        <Animated.View 
-          style={[
-            tw`w-full mt-2`,
-            { 
-              opacity: fadeAnim,
-              transform: [{ translateY: translateY }] 
-            }
-          ]}
-        >
-          <OffersList 
-            driverId={userData?.driver_id} 
-            navigation={navigation} 
-          />
-        </Animated.View>
-
-        {/* Ad Banner with animation */}
-        <Animated.View 
-          style={[
-            tw`w-full mt-4`,
-            { 
-              opacity: fadeAnim,
-              transform: [{ translateY: translateY }] 
-            }
-          ]}
-        >
-          <AdBanner ads={notices} />
-        </Animated.View>
+        {/* Driver Profile Section */}
+        <DriverProfile 
+          userData={userData} 
+          driverScore={driverScore} 
+          profitToday={profitToday}
+          isLoading={profitLoading || scoreLoading}
+          onProfilePress={() => navigation.navigate('ProfileTab')}
+        />
+        
+        {/* Promotion Banner */}
+        <PromotionBanner />
+        
+        {/* Pending Offers Section */}
+        <OffersSection 
+          offers={offerData} 
+          isLoading={loading} 
+          onOfferPress={handleOfferPress}
+          onOfferCancel={handleOfferCancel}
+          userData={userData} // ส่ง userData เพื่อใช้ในการยกเลิกข้อเสนอ
+          maxVisible={2} // แสดงแค่ 2 รายการ
+        />
+        
+        {/* Spacing at the bottom */}
+        <View style={tw`h-24`} />
       </ScrollView>
-
-      {/* Job Search Button with animation and gradient */}
-      <Animated.View 
-        style={[
-          tw`absolute w-full items-center`,
-          {
-            bottom: Math.max(insets.bottom + 8, 16), // Ensure proper spacing on devices with or without home indicator
-            opacity: buttonAnim,
-            transform: [{ scale: buttonAnim }],
-          }
-        ]}
-      >
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={handleJobSearch}
-          style={tw`w-10/12`}
-        >
-          <LinearGradient
-            colors={['#60B876', '#3C9D57']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={tw`rounded-full px-4 py-3 items-center shadow-lg`}
-          >
-            <View style={tw`flex-row items-center justify-center`}>
-              <LottieView
-                ref={lottieRef}
-                source={require('../../assets/animations/search-animation.json')}
-                style={tw`w-6 h-6 mr-2`}
-                autoPlay
-                loop
-              />
-              <Text style={[{ fontFamily: 'Mitr-Regular' }, tw`text-white text-lg font-medium`]}>
-                ค้นหางาน
-              </Text>
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
-      </Animated.View>
+      
+      {/* Find Job Button (Fixed at bottom) */}
+      <FindJobButton 
+        onPress={handleFindJobPress} 
+        disabled={disableFindJob} 
+        disabledMessage={findJobDisabledMessage}
+      />
     </SafeAreaView>
   );
 };

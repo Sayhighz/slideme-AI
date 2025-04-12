@@ -19,7 +19,7 @@ import AuthButton from '../../components/auth/AuthButton';
 import AuthLogo from '../../components/auth/AuthLogo';
 
 // Import services and constants
-import { login } from '../../services/auth';
+import { checkAuth, login } from '../../services/auth';
 import { FONTS, COLORS, MESSAGES } from '../../constants';
 
 const LoginScreen = ({ navigation }) => {
@@ -46,25 +46,45 @@ const LoginScreen = ({ navigation }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleLogin = async () => {
-    if (!validateForm()) return;
+  // ใน LoginScreen.js
+const handleLogin = async () => {
+  if (!validateForm()) return;
+  
+  setIsLoading(true);
+  try {
+    const response = await login(phoneNumber, password);
     
-    setIsLoading(true);
-    try {
-      const response = await login(phoneNumber, password);
+    if (response.Status && response.token) {
+      Alert.alert('สำเร็จ', MESSAGES.SUCCESS.LOGIN);
       
-      if (response.status && response.token) {
-        Alert.alert('สำเร็จ', MESSAGES.SUCCESS.LOGIN);
+      // แทนที่จะพยายาม navigate หรือ reset navigation
+      // แค่รีโหลดแอพก็เพียงพอ เพราะ AppNavigator จะตรวจสอบข้อมูลการล็อกอิน
+      // และสลับเป็น MainNavigator โดยอัตโนมัติ
+      
+      // สำหรับ development
+      if (__DEV__) {
+        const DevSettings = require('react-native').DevSettings;
+        DevSettings.reload();
       } else {
-        setErrors({ login: { message: response.Error || MESSAGES.ERRORS.LOGIN } });
+        // สำหรับ production
+        // ให้ผู้ใช้กด OK ที่แจ้งเตือน และแอพจะรีโหลดเอง
+        setTimeout(() => {
+          // เนื่องจากเราไม่สามารถรีโหลดแอพได้โดยตรงใน production
+          // เราทำได้เพียงเปลี่ยนเส้นทางไปยังหน้าจอเริ่มต้นใหม่
+          // ซึ่งจะทำให้ AppNavigator ตรวจสอบสถานะการล็อกอินอีกครั้ง
+          navigation.navigate('Login');
+        }, 500);
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      setErrors({ login: { message: MESSAGES.ERRORS.CONNECTION } });
-    } finally {
-      setIsLoading(false);
+    } else {
+      setErrors({ login: { message: response.Error || MESSAGES.ERRORS.LOGIN } });
     }
-  };
+  } catch (error) {
+    console.error('Login error:', error);
+    setErrors({ login: { message: MESSAGES.ERRORS.CONNECTION } });
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <SafeAreaView style={tw`flex-1 bg-white`}>

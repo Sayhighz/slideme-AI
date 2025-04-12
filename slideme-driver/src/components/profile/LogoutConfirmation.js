@@ -1,66 +1,199 @@
-import React from 'react';
-import { View, Text, Modal, TouchableOpacity } from 'react-native';
-import tw from 'twrnc';
+import React, { useEffect, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  Modal, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Animated, 
+  Dimensions,
+  TouchableWithoutFeedback
+} from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import { FONTS, COLORS, MESSAGES } from '../../constants';
 
+const { height } = Dimensions.get('window');
+
 const LogoutConfirmation = ({ visible, onConfirm, onCancel }) => {
+  // Animation references
+  const slideAnim = useRef(new Animated.Value(height)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    if (visible) {
+      // Animate in
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          tension: 70,
+          friction: 12,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Animate out
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: height,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
+
+  // If not visible, don't render
+  if (!visible && slideAnim._value === height) return null;
+
   return (
     <Modal
       transparent={true}
-      visible={visible}
-      animationType="fade"
+      visible={true}
+      animationType="none"
       onRequestClose={onCancel}
     >
-      <View style={tw`flex-1 bg-black/50 justify-center items-center`}>
-        <View style={tw`w-4/5 bg-white rounded-lg p-5`}>
-          <Text 
-            style={[
-              tw`text-lg mb-4 text-center`,
-              { fontFamily: FONTS.FAMILY.REGULAR }
-            ]}
-          >
-            ยืนยันการออกจากระบบ
-          </Text>
-          <Text 
-            style={[
-              tw`text-base mb-6 text-center text-gray-600`,
-              { fontFamily: FONTS.FAMILY.REGULAR }
-            ]}
-          >
-            {MESSAGES.CONFIRM.LOGOUT}
-          </Text>
-          <View style={tw`flex-row justify-between`}>
-            <TouchableOpacity
-              style={tw`flex-1 bg-gray-300 rounded-md py-2 mr-2 items-center`}
-              onPress={onCancel}
+      <TouchableWithoutFeedback onPress={onCancel}>
+        <Animated.View 
+          style={[
+            styles.backdrop,
+            { opacity: backdropOpacity }
+          ]}
+        >
+          <TouchableWithoutFeedback>
+            <Animated.View 
+              style={[
+                styles.modalContainer,
+                { transform: [{ translateY: slideAnim }] }
+              ]}
             >
-              <Text 
-                style={[
-                  tw`text-base text-black`,
-                  { fontFamily: FONTS.FAMILY.REGULAR }
-                ]}
-              >
-                ยกเลิก
+              <View style={styles.handle} />
+              
+              <View style={styles.iconContainer}>
+                <Icon name="logout" size={48} color={COLORS.DANGER} />
+              </View>
+              
+              <Text style={styles.title}>
+                ยืนยันการออกจากระบบ
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={tw`flex-1 bg-red-500 rounded-md py-2 ml-2 items-center`}
-              onPress={onConfirm}
-            >
-              <Text 
-                style={[
-                  tw`text-base text-white`,
-                  { fontFamily: FONTS.FAMILY.REGULAR }
-                ]}
-              >
-                ออกจากระบบ
+              
+              <Text style={styles.message}>
+                {MESSAGES.CONFIRM.LOGOUT}
               </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+              
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={onCancel}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.cancelButtonText}>
+                    ยกเลิก
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.confirmButton}
+                  onPress={onConfirm}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.confirmButtonText}>
+                    ออกจากระบบ
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </TouchableWithoutFeedback>
+        </Animated.View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 };
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: COLORS.GRAY_300,
+    borderRadius: 2,
+    marginBottom: 24,
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: `${COLORS.DANGER}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 20,
+    color: COLORS.TEXT_PRIMARY,
+    fontFamily: FONTS.FAMILY.MEDIUM || FONTS.FAMILY.REGULAR,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 16,
+    color: COLORS.GRAY_600,
+    fontFamily: FONTS.FAMILY.REGULAR,
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 8,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: COLORS.GRAY_200,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: COLORS.GRAY_700,
+    fontSize: 16,
+    fontFamily: FONTS.FAMILY.MEDIUM || FONTS.FAMILY.REGULAR,
+  },
+  confirmButton: {
+    flex: 1,
+    backgroundColor: COLORS.DANGER,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontFamily: FONTS.FAMILY.MEDIUM || FONTS.FAMILY.REGULAR,
+  },
+});
 
 export default LogoutConfirmation;

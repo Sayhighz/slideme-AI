@@ -33,6 +33,11 @@ export const API_ENDPOINTS = {
         BREAKDOWN: '/driver/earning/breakdown',
         TODAY: '/driver/earning/today',
       },
+      NOTIFICATION: {
+        REGISTER_TOKEN: '/driver/notification/register-token',
+        GET_UNREAD: '/driver/notification/unread',
+        MARK_AS_READ: '/driver/notification/mark-read',
+      }
     },
     
     // ===== Jobs =====
