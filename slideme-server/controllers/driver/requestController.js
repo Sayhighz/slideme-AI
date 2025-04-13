@@ -4,7 +4,7 @@
  */
 import db from '../../config/db.js';
 import logger from '../../config/logger.js';
-import { DatabaseError, NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors/customErrors.js';
+import { DatabaseError, NotFoundError, ValidationError, ForbiddenError, CustomError } from '../../utils/errors/customErrors.js';
 import { STATUS_CODES } from '../../utils/constants/statusCodes.js';
 import { ERROR_MESSAGES } from '../../utils/errors/errorMessages.js';
 import { formatSuccessResponse, formatErrorResponse, formatServiceRequest } from '../../utils/formatters/responseFormatter.js';
@@ -16,6 +16,7 @@ import mapService from '../../services/location/mapService.js';
 import socketService from '../../services/communication/socketService.js';
 import { maskString } from '../../utils/helpers/stringHelpers.js';
 import { formatDisplayDate, formatTimeString } from '../../utils/formatters/dateFormatter.js';
+import { formatThaiBaht } from '../../utils/formatters/currencyFormatter.js';
 
 /**
  * Get available service requests
@@ -352,73 +353,92 @@ export const getActiveRequests = asyncHandler(async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+/**
+ * Complete a service request
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
 export const completeRequest = asyncHandler(async (req, res) => {
-    const { request_id, customer_id } = req.body;
+  const { request_id, driver_id } = req.body;
+
+  if (!request_id || !driver_id) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
+  }
+
+  // Check if the request exists, belongs to the driver through an offer, and is in accepted status
+  const checkSql = `
+    SELECT r.request_id, r.status, r.customer_id, o.driver_id, o.offer_id, o.offered_price, r.payment_id, 
+           r.location_from, r.location_to, v.vehicletype_name,
+           r.pickup_lat, r.pickup_long, r.dropoff_lat, r.dropoff_long,
+           pm.method_name
+    FROM servicerequests r
+    JOIN driveroffers o ON r.offer_id = o.offer_id
+    JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
+    JOIN payments p ON r.payment_id = p.payment_id
+    JOIN paymentmethod pm ON p.payment_method_id = pm.payment_method_id
+    WHERE r.request_id = ? AND o.driver_id = ? AND r.status = ?
+  `;
+
+  const checkResult = await db.query(checkSql, [request_id, driver_id, REQUEST_STATUS.ACCEPTED]);
+
+  if (checkResult.length === 0) {
+    throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้นหรือคำขอไม่ได้มอบหมายให้คนขับนี้");
+  }
+
+  const { customer_id, offer_id, offered_price, payment_id, location_from, location_to, 
+          vehicletype_name, pickup_lat, pickup_long, dropoff_lat, dropoff_long, 
+          method_name } = checkResult[0];
   
-    if (!request_id || !customer_id) {
-      throw new ValidationError("กรุณาระบุ request_id และ customer_id");
-    }
-  
-    // Check if the request exists, belongs to the customer, and is in accepted status
-    const checkSql = `
-      SELECT r.request_id, r.status, o.driver_id, o.offered_price, r.payment_id, 
-             r.location_from, r.location_to, v.vehicletype_name,
-             r.pickup_lat, r.pickup_long, r.dropoff_lat, r.dropoff_long,
-             pm.method_name
-      FROM servicerequests r
-      JOIN driveroffers o ON r.offer_id = o.offer_id
-      JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
-      JOIN payments p ON r.payment_id = p.payment_id
-      JOIN paymentmethod pm ON p.payment_method_id = pm.payment_method_id
-      WHERE r.request_id = ? AND r.customer_id = ? AND r.status = ?
+  // คำนวณระยะทางและเวลาเดินทาง
+  const tripDistance = distanceService.calculateDistance(
+    pickup_lat, pickup_long, dropoff_lat, dropoff_long
+  );
+  const travelTime = distanceService.calculateTravelTime(tripDistance);
+
+  // Start a database transaction
+  const connection = await db.beginTransaction();
+
+  try {
+    // Update request status
+    const updateSql = `
+      UPDATE servicerequests 
+      SET status = ? 
+      WHERE request_id = ?
     `;
-  
-    const checkResult = await db.query(checkSql, [request_id, customer_id, REQUEST_STATUS.ACCEPTED]);
-  
-    if (checkResult.length === 0) {
-      throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้น");
-    }
-  
-    const { driver_id, offered_price, payment_id, location_from, location_to, 
-            vehicletype_name, pickup_lat, pickup_long, dropoff_lat, dropoff_long, 
-            method_name } = checkResult[0];
-    
-    // คำนวณระยะทางและเวลาเดินทาง
-    const tripDistance = distanceService.calculateDistance(
-      pickup_lat, pickup_long, dropoff_lat, dropoff_long
+
+    await db.transactionQuery(
+      connection,
+      updateSql,
+      [REQUEST_STATUS.COMPLETED, request_id]
     );
-    const travelTime = distanceService.calculateTravelTime(tripDistance);
-  
-    // Start a database transaction
-    const connection = await db.beginTransaction();
-  
-    try {
-      // Update request status
-      const updateSql = `
-        UPDATE servicerequests 
-        SET status = ? 
-        WHERE request_id = ? AND customer_id = ?
-      `;
-  
-      await db.transactionQuery(
-        connection,
-        updateSql,
-        [REQUEST_STATUS.COMPLETED, request_id, customer_id]
-      );
-  
-      // Update payment status
-      const updatePaymentSql = `
-        UPDATE payments
-        SET payment_status = ?
-        WHERE payment_id = ?
-      `;
-  
-      await db.transactionQuery(
-        connection,
-        updatePaymentSql,
-        [PAYMENT_STATUS.COMPLETED, payment_id]
-      );
-  
+
+    // Update payment status
+    const updatePaymentSql = `
+      UPDATE payments
+      SET payment_status = ?
+      WHERE payment_id = ?
+    `;
+
+    await db.transactionQuery(
+      connection,
+      updatePaymentSql,
+      ['Completed', payment_id]
+    );
+
+    // Check if receipt already exists to avoid duplicates
+    const checkReceiptSql = `
+      SELECT receipt_id FROM service_receipts 
+      WHERE request_id = ?
+    `;
+    
+    const existingReceipt = await db.transactionQuery(
+      connection,
+      checkReceiptSql,
+      [request_id]
+    );
+    
+    // Only create receipt if it doesn't exist
+    if (existingReceipt.length === 0) {
       // เพิ่มการสร้าง service_receipt
       const createReceiptSql = `
         INSERT INTO service_receipts (
@@ -428,38 +448,75 @@ export const completeRequest = asyncHandler(async (req, res) => {
           distance_km, travel_time_minutes
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-  
+
       await db.transactionQuery(
         connection,
         createReceiptSql,
         [
-          request_id, customer_id, driver_id, payment_id, checkResult[0].offer_id,
+          request_id, customer_id, driver_id, payment_id, offer_id,
           location_from, location_to, vehicletype_name,
-          offered_price, method_name, PAYMENT_STATUS.COMPLETED,
+          offered_price, method_name, 'Completed',
           tripDistance, travelTime
         ]
       );
-  
-      // Commit the transaction
-      await db.commitTransaction(connection);
-  
-      // Notify driver about completed service
-      // ...existing notification code...
-  
-      return res.status(STATUS_CODES.OK).json(
-        formatSuccessResponse({
-          request_id,
-          driver_id,
-          price: offered_price,
-          price_formatted: formatThaiBaht(offered_price),
-          status: REQUEST_STATUS.COMPLETED
-        }, "เสร็จสิ้นคำขอบริการสำเร็จ")
-      );
-    } catch (error) {
-      await db.rollbackTransaction(connection);
-      throw error;
     }
-  });
+
+    // Commit the transaction
+    await db.commitTransaction(connection);
+
+    // Create notification for customer
+    try {
+      // Fetch customer's push token and send notification
+      const notificationText = `บริการของคุณเสร็จสิ้นแล้ว ขอบคุณที่ใช้บริการ Slideme`;
+      
+      // Create notification in database
+      await notificationService.createNotification({
+        user_id: customer_id,
+        user_type: 'customer',
+        title: 'บริการเสร็จสิ้น',
+        message: notificationText,
+        type: 'service',
+        related_id: request_id
+      });
+      
+      // Send push notification (in background, don't await)
+      notificationService.sendPushToCustomer(customer_id, {
+        title: 'บริการเสร็จสิ้น',
+        body: notificationText,
+        data: {
+          type: 'service_completed',
+          request_id
+        }
+      }).catch(err => {
+        logger.error('Error sending push notification to customer', {
+          error: err.message,
+          customer_id,
+          request_id
+        });
+      });
+    } catch (notificationError) {
+      // Log error but don't fail the transaction
+      logger.error('Error sending notification to customer', {
+        error: notificationError.message,
+        customer_id,
+        request_id
+      });
+    }
+
+    return res.status(STATUS_CODES.OK).json(
+      formatSuccessResponse({
+        request_id,
+        driver_id,
+        price: offered_price,
+        price_formatted: formatThaiBaht(offered_price),
+        status: REQUEST_STATUS.COMPLETED
+      }, "เสร็จสิ้นคำขอบริการสำเร็จ")
+    );
+  } catch (error) {
+    await db.rollbackTransaction(connection);
+    throw error;
+  }
+});
   
 /**
  * Notify customer of driver arrival
@@ -673,6 +730,73 @@ export const getCustomerInfo = asyncHandler(async (req, res) => {
   return res.status(STATUS_CODES.OK).json(formatSuccessResponse(customer));
 });
 
+
+/**
+ * Update service request status
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const updateServiceStatus = asyncHandler(async (req, res) => {
+  const { request_id, driver_id, status } = req.body;
+
+  // Validate input
+  if (!request_id || !driver_id || !status) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id', 'status']);
+  }
+
+  // Valid status values
+  const validStatuses = ['accepted', 'pickup_in_progress' , 'delivery_in_progress', 'completed', 'cancelled'];
+  if (!validStatuses.includes(status)) {
+    throw new ValidationError('สถานะไม่ถูกต้อง', [`สถานะต้องเป็นหนึ่งใน: ${validStatuses.join(', ')}`]);
+  }
+
+  try {
+    const db = (await import('../../config/db.js')).default;
+    
+    // Check if the request exists and belongs to this driver (via offer)
+    const requestExists = await db.query(
+      `SELECT sr.request_id, sr.status, do.driver_id
+       FROM servicerequests sr
+       LEFT JOIN driveroffers do ON sr.offer_id = do.offer_id
+       WHERE sr.request_id = ? AND do.driver_id = ?`,
+      [request_id, driver_id]
+    );
+
+    if (requestExists.length === 0) {
+      throw new NotFoundError('ไม่พบข้อมูลการร้องขอบริการนี้ หรือไม่มีสิทธิ์ในการอัปเดตข้อมูล');
+    }
+
+    // Update the status
+    await db.query(
+      `UPDATE servicerequests 
+       SET status = ?, 
+           updated_at = NOW() 
+       WHERE request_id = ?`,
+      [status, request_id]
+    );
+
+    logger.info(`Service request status updated to ${status}`, { 
+      request_id,
+      driver_id,
+      status
+    });
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      request_id,
+      status
+    }, 'อัปเดตสถานะการให้บริการสำเร็จ'));
+  } catch (error) {
+    logger.error('Error updating service request status', { 
+      request_id,
+      driver_id,
+      status,
+      error: error.message 
+    });
+    
+    throw new CustomError('เกิดข้อผิดพลาดในการอัปเดตสถานะ', STATUS_CODES.INTERNAL_SERVER_ERROR);
+  }
+});
+
 export default {
   getAvailableRequests,
   getRequestDetails,
@@ -680,5 +804,6 @@ export default {
   completeRequest,
   notifyArrival,
   getRequestHistory,
-  getCustomerInfo
+  getCustomerInfo,
+  updateServiceStatus
 };

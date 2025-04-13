@@ -192,8 +192,8 @@ export default function JobsScreen({ route }) {
   const handleJobPress = (job) => {
     // Use the API-provided distance if available, otherwise calculate it
     const jobDistance = job.distance_text || 
-      (job.distance ? `${job.distance.toFixed(1)} กม.` : 
-      `${calculateDistance(job.pickup_lat, job.pickup_long, job.dropoff_lat, job.dropoff_long).toFixed(1)} กม.`);
+      (job.distance ? `${job.distance} กม.` : 
+      `${calculateDistance(job.pickup_lat, job.pickup_long, job.dropoff_lat, job.dropoff_long)} กม.`);
     
     navigation.navigate("JobDetail", {
       requestId: job.request_id,
@@ -393,8 +393,8 @@ export default function JobsScreen({ route }) {
             job={{
               ...item,
               distance: item.distance_text || 
-                       (item.distance && `${item.distance.toFixed(1)} กม.`) || 
-                       `${calculateDistance(item.pickup_lat, item.pickup_long, item.dropoff_lat, item.dropoff_long).toFixed(1)} กม.`
+                       (item.distance && `${item.distance} กม.`) || 
+                       `${calculateDistance(item.pickup_lat, item.pickup_long, item.dropoff_lat, item.dropoff_long)} กม.`
             }}
             onPress={handleJobPress}
           />

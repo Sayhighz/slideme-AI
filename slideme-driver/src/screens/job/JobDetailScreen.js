@@ -61,10 +61,10 @@ export default function JobDetailScreen({ route, navigation }) {
     try {
       // Clean the price string (remove commas)
       const cleanPrice = offeredPrice.replace(/,/g, "");
-      
+      console.log("sadasddsa",requestId, userData?.driver_id)
       const result = await postRequest(API_ENDPOINTS.JOBS.CREATE_OFFER, {
         request_id: requestId,
-        driver_id: userData?.driver_id,
+        driver_id: userData.userData.driver_id,
         offered_price: parseFloat(cleanPrice),
       });
 

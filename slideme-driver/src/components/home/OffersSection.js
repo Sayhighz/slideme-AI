@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import tw from 'twrnc';
+import { useNavigation } from '@react-navigation/native';
 
 // Constants
 import { COLORS, FONTS, STATUS, MESSAGES } from '../../constants';
@@ -287,6 +288,7 @@ const OffersSection = ({
 }) => {
   // สถานะการแสดงข้อเสนอทั้งหมด
   const [showAll, setShowAll] = useState(false);
+  const navigation = useNavigation();
   
   // แยกข้อมูลจาก API response
   const offers = apiResponse?.Result || [];
@@ -314,6 +316,31 @@ const OffersSection = ({
     } catch (error) {
       console.error('Error cancelling offer:', error);
       throw error;
+    }
+  };
+
+  // ฟังก์ชันจัดการเมื่อกดที่ offer
+  const handleOfferPress = (offer) => {
+    // ตรวจสอบสถานะของข้อเสนอ
+    if (offer.offer_status === 'accepted') {
+      // ถ้าเป็นสถานะ accepted ให้นำทางไปยังหน้า JobWorkingPickupScreen
+      navigation.navigate('JobWorkingPickup', {
+        request_id: offer.request_id,
+        userData
+      });
+    } else if (offer.offer_status === 'pending') {
+      // สำหรับสถานะ pending อาจจะแสดงรายละเอียดเพิ่มเติมหรือไม่ทำอะไร
+      Alert.alert(
+        "ข้อเสนอรอการตอบรับ",
+        "ข้อเสนอนี้กำลังรออยู่ในระบบ คุณจะได้รับการแจ้งเตือนเมื่อลูกค้าตอบรับ"
+      );
+    } else {
+      // สำหรับสถานะอื่นๆ อาจจะแสดงข้อความตามสถานะ
+      Alert.alert(
+        "ข้อมูลข้อเสนอ",
+        `ข้อเสนอนี้มีสถานะ: ${offer.offer_status === 'rejected' ? 'ถูกปฏิเสธ' : 
+          offer.offer_status === 'expired' ? 'หมดอายุ' : offer.offer_status}`
+      );
     }
   };
 
@@ -370,6 +397,7 @@ const OffersSection = ({
             <OfferItem 
               key={item.offer_id?.toString() || `offer-${index}`}
               offer={item} 
+              onPress={handleOfferPress}
               onCancel={handleCancelOffer}
               index={index} 
             />

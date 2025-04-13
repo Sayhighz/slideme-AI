@@ -6,7 +6,8 @@ import {
   completeRequest,
   notifyArrival,
   getRequestHistory,
-  getCustomerInfo
+  getCustomerInfo,
+  updateServiceStatus
 } from '../../controllers/driver/requestController.js';
 
 const router = express.Router();
@@ -265,5 +266,49 @@ router.get('/history/:driver_id', getRequestHistory);
  *         description: เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์
  */
 router.get('/customer-info', getCustomerInfo);
+
+/**
+* @swagger
+ * /api/v1/driver/request/update_status:
+ *   post:
+ *     summary: อัปเดตสถานะของการให้บริการ
+ *     description: |
+ *       - อัปเดตสถานะของการให้บริการโดยคนขับ
+ *     tags: [DriverRequests]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - request_id
+ *               - driver_id
+ *               - status
+ *             properties:
+ *               request_id:
+ *                 type: integer
+ *                 description: รหัสคำขอบริการ
+ *                 example: 123
+ *               driver_id:
+ *                 type: integer
+ *                 description: รหัสคนขับ
+ *                 example: 45
+ *               status:
+ *                 type: string
+ *                 description: สถานะใหม่ของการให้บริการ
+ *                 enum: [accepted, pickup_in_progress, pickup_completed, dropoff_in_progress, completed, cancelled]
+ *                 example: pickup_in_progress
+ *     responses:
+ *       200:
+ *         description: อัปเดตสถานะสำเร็จ
+ *       400:
+ *         description: ข้อมูลไม่ถูกต้อง
+ *       404:
+ *         description: ไม่พบข้อมูลการร้องขอบริการ
+ *       500:
+ *         description: เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์
+ */
+router.post("/update_status", updateServiceStatus);
 
 export default router;

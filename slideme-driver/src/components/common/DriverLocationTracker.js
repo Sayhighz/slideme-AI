@@ -1,39 +1,80 @@
-import React, { useEffect, useRef } from 'react';
-import { startLocationTracking } from '../../services/location';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Platform, ActivityIndicator, Alert } from 'react-native';
+import { startLocationTracking, requestLocationPermission } from '../../services/location';
 
+// Component ที่จะติดตามตำแหน่งของผู้ขับและอัปเดตไปยังเซิร์ฟเวอร์อย่างต่อเนื่อง
 const DriverLocationTracker = ({ driverId }) => {
-  const locationWatcher = useRef(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const [locationSubscription, setLocationSubscription] = useState(null);
 
+  // เริ่มการติดตามตำแหน่งเมื่อ component mount
   useEffect(() => {
-    const initLocationTracking = async () => {
-      try {
-        // If no driver ID, don't start tracking
-        if (!driverId) return;
+    let isMounted = true;
 
-        // Stop any existing location tracking
-        if (locationWatcher.current) {
-          locationWatcher.current.remove();
+    // ฟังก์ชันสำหรับเริ่มการติดตามตำแหน่ง
+    const startTracking = async () => {
+      try {
+        // ขอสิทธิ์การเข้าถึงตำแหน่ง
+        const hasPermission = await requestLocationPermission();
+        
+        if (!hasPermission) {
+          Alert.alert(
+            "ต้องการสิทธิ์การเข้าถึงตำแหน่ง",
+            "แอปต้องการสิทธิ์การเข้าถึงตำแหน่งเพื่อรับงานในพื้นที่ของคุณ",
+            [
+              { text: "ตกลง", onPress: () => startTracking() }
+            ]
+          );
+          return;
         }
 
-        // Start new location tracking
-        locationWatcher.current = await startLocationTracking(driverId);
+        // เริ่มการติดตามตำแหน่ง
+        if (driverId && !isTracking) {
+          console.log("Starting location tracking for driver:", driverId);
+          
+          const subscription = await startLocationTracking(driverId, (latitude, longitude) => {
+            // เมื่อตำแหน่งมีการเปลี่ยนแปลง
+            console.log(`Updated location: (${latitude}, ${longitude})`);
+          });
+          
+          if (isMounted) {
+            setLocationSubscription(subscription);
+            setIsTracking(true);
+          } else if (subscription) {
+            // ถ้า component ถูก unmount ระหว่างเริ่มการติดตาม
+            subscription.remove();
+          }
+        }
       } catch (error) {
-        console.error('Location tracking error:', error);
+        console.error("Error starting location tracking:", error);
+        Alert.alert(
+          "ข้อผิดพลาด",
+          "ไม่สามารถติดตามตำแหน่งได้ โปรดลองใหม่อีกครั้ง",
+          [
+            { text: "ลองอีกครั้ง", onPress: () => startTracking() },
+            { text: "ยกเลิก", style: "cancel" }
+          ]
+        );
       }
     };
 
-    // Initialize location tracking
-    initLocationTracking();
+    // เริ่มการติดตามถ้ามี driverId
+    if (driverId) {
+      startTracking();
+    }
 
-    // Cleanup function to stop tracking when component unmounts
+    // เมื่อ component จะถูก unmount
     return () => {
-      if (locationWatcher.current) {
-        locationWatcher.current.remove();
+      isMounted = false;
+      // ยกเลิกการติดตามตำแหน่ง
+      if (locationSubscription) {
+        console.log("Removing location tracking subscription");
+        locationSubscription.remove();
       }
     };
   }, [driverId]);
 
-  // Render nothing, this is a background tracking component
+  // ไม่แสดงอะไรใน UI (ทำงานในเบื้องหลัง)
   return null;
 };
 

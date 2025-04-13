@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import tw from 'twrnc';
 import { FONTS, COLORS } from '../../constants';
 
@@ -18,17 +18,17 @@ const ChatMessage = ({ message, sender, currentUserId, timestamp }) => {
   return (
     <View
       style={[
-        tw`m-2 rounded-xl max-w-3/4 px-4 py-3 shadow-sm`,
+        tw`m-2 rounded-xl max-w-3/4 px-4 py-3`,
         isCurrentUser
-          ? tw`bg-[${COLORS.PRIMARY}] self-end`
-          : tw`bg-white self-start border border-gray-200`,
+          ? [styles.currentUserBubble, { backgroundColor: COLORS.PRIMARY }]
+          : [styles.otherUserBubble, tw`bg-white border border-gray-200`],
       ]}
     >
       <Text
         style={[
           { fontFamily: FONTS.FAMILY.REGULAR },
-          tw`text-sm`,
-          isCurrentUser ? tw`text-white` : tw`text-gray-700`,
+          tw`text-base`,
+          isCurrentUser ? tw`text-white` : tw`text-gray-800`,
         ]}
       >
         {message}
@@ -48,5 +48,38 @@ const ChatMessage = ({ message, sender, currentUserId, timestamp }) => {
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  currentUserBubble: {
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: COLORS.PRIMARY,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
+  },
+  otherUserBubble: {
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 1,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
+  }
+});
 
 export default ChatMessage;

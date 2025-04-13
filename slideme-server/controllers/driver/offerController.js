@@ -105,15 +105,15 @@ export const createOffer = async (req, res) => {
     );
 
     // Notify customer about new offer if socket is available
-    if (socketService && customerData.length > 0) {
-      const customer_id = customerData[0].customer_id;
-      socketService.notifyCustomer(customer_id, 'newOffer', {
-        request_id,
-        driver_id,
-        offer_id: result.insertId,
-        price: offered_price
-      });
-    }
+    // if (socketService && customerData.length > 0) {
+    //   const customer_id = customerData[0].customer_id;
+    //   socketService.notifyCustomer(customer_id, 'newOffer', {
+    //     request_id,
+    //     driver_id,
+    //     offer_id: result.insertId,
+    //     price: offered_price
+    //   });
+    // }
 
     logger.info('Driver created new offer', {
       driver_id,
@@ -468,11 +468,83 @@ export const getOffersHistory = async (req, res) => {
   }
 };
 
+/**
+ * Check if driver has an accepted offer
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const checkAcceptedOffer = async (req, res) => {
+  try {
+    const { driver_id } = req.query;
+    
+    if (!driver_id) {
+      throw new ValidationError("กรุณาระบุ driver_id");
+    }
+
+    const sql = `
+      SELECT
+        d.offer_id,
+        d.request_id,
+        d.offered_price,
+        d.offer_status,
+        d.created_at,
+        s.location_from,
+        s.location_to,
+        s.status as request_status,
+        s.pickup_lat,
+        s.pickup_long,
+        s.dropoff_lat,
+        s.dropoff_long,
+        s.customer_id,
+        s.customer_message,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        c.phone_number as customer_phone,
+        CONCAT(c.first_name, ' ', c.last_name) as customer_name,
+        v.vehicletype_name
+      FROM driveroffers d
+      JOIN servicerequests s ON d.request_id = s.request_id
+      JOIN customers c ON s.customer_id = c.customer_id
+      JOIN vehicle_types v ON s.vehicletype_id = v.vehicletype_id
+      WHERE d.driver_id = ?
+      AND d.offer_status = '${OFFER_STATUS.ACCEPTED}'
+      AND s.status = '${REQUEST_STATUS.ACCEPTED}'
+      LIMIT 1
+    `;
+
+    const offers = await db.query(sql, [driver_id]);
+
+    if (offers.length === 0) {
+      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+        has_accepted_offer: false,
+        offer: null
+      }));
+    }
+
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+      has_accepted_offer: true,
+      offer: offers[0]
+    }));
+  } catch (error) {
+    logger.error('Error checking accepted offer', { 
+      driver_id: req.query.driver_id,
+      error: error.message 
+    });
+    
+    if (error instanceof ValidationError) {
+      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
+    }
+    
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
+  }
+};
+
 export default {
   createOffer,
   getDriverOffers,
   cancelOffer,
   getOfferDetails,
   rejectAllPendingOffers,
-  getOffersHistory
+  getOffersHistory,
+  checkAcceptedOffer
 };

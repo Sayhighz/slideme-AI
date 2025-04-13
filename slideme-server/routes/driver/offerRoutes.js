@@ -5,7 +5,8 @@ import {
   cancelOffer, 
   getOfferDetails,
   rejectAllPendingOffers,
-  getOffersHistory
+  getOffersHistory,
+  checkAcceptedOffer
 } from '../../controllers/driver/offerController.js';
 
 const router = express.Router();
@@ -214,5 +215,30 @@ router.post('/reject-all', rejectAllPendingOffers);
  *         description: เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์
  */
 router.get('/history', getOffersHistory);
+
+/**
+ * @swagger
+ * /api/v1/driver/offer/check-accepted:
+ *   get:
+ *     summary: ตรวจสอบข้อเสนอที่ถูกยอมรับ
+ *     description: | 
+ *       - ตรวจสอบว่าคนขับมีข้อเสนอที่ถูกยอมรับแล้วหรือไม่
+ *     tags: [Driver Offers]
+ *     parameters:
+ *       - in: query
+ *         name: driver_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: รหัสคนขับ
+ *     responses:
+ *       200:
+ *         description: ตรวจสอบข้อเสนอสำเร็จ
+ *       400:
+ *         description: กรุณาระบุ driver_id
+ *       500:
+ *         description: เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์
+ */
+router.get('/check-accepted', checkAcceptedOffer);
 
 export default router;

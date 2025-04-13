@@ -1,26 +1,30 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Text, View } from 'react-native';
+import { Text, View, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import tw from 'twrnc';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Screens
-import HomeScreen from '../screens/home/HomeScreen.js';
-import JobsScreen from '../screens/job/JobsScreen.js';
+import HomeScreen from '../screens/home/HomeScreen';
+import JobsScreen from '../screens/job/JobsScreen';
 import JobDetailScreen from '../screens/job/JobDetailScreen';
 import JobWorkingPickupScreen from '../screens/job/JobWorkingPickupScreen';
 import JobWorkingDropoffScreen from '../screens/job/JobWorkingDropoffScreen';
-import CarUploadPickUpConfirmationScreen from '../screens/job/CarUploadPickupConfirmationScreen.js';
-import CarUploadDropOffConfirmationScreen from '../screens/job/CarUploadDropoffConfirmationScreen.js';
-import HistoryScreen from '../screens/history/HistoryScreen.js';
-import ProfileScreen from '../screens/profile/ProfileScreen.js';
-import PersonalInfoScreen from '../screens/profile/PersonalInfoScreen.js';
-import EditInfoScreen from '../screens/profile/EditInfoScreen.js';
-import ChatScreen from '../screens/chat/ChatScreen.js';
+import CarUploadPickUpConfirmationScreen from '../screens/job/CarUploadPickupConfirmationScreen';
+import CarUploadDropOffConfirmationScreen from '../screens/job/CarUploadDropoffConfirmationScreen';
+import HistoryScreen from '../screens/history/HistoryScreen';
+import ProfileScreen from '../screens/profile/ProfileScreen';
+import PersonalInfoScreen from '../screens/profile/PersonalInfoScreen';
+import EditInfoScreen from '../screens/profile/EditInfoScreen';
+import ChatScreen from '../screens/chat/ChatScreen';
 
 // Components
-import DriverLocationTracker from '../components/common/DriverLocationTracker.js';
+import DriverLocationTracker from '../components/common/DriverLocationTracker';
+
+// Constants
+import { COLORS, FONTS } from '../constants';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -28,7 +32,17 @@ const Stack = createStackNavigator();
 // Stack Navigator สำหรับหน้า Home
 const HomeStackNavigator = ({ userData }) => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        cardStyle: { backgroundColor: '#FFFFFF' },
+        cardStyleInterpolator: ({ current: { progress } }) => ({
+          cardStyle: {
+            opacity: progress,
+          },
+        }),
+      }}
+    >
       <Stack.Screen
         name="HomeMain"
         component={HomeScreen}
@@ -71,12 +85,22 @@ const HomeStackNavigator = ({ userData }) => {
       />
     </Stack.Navigator>
   );
-}
+};
 
 // Stack Navigator สำหรับหน้า Profile
 const ProfileStackNavigator = ({ userData, handleLogout }) => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        cardStyle: { backgroundColor: '#FFFFFF' },
+        cardStyleInterpolator: ({ current: { progress } }) => ({
+          cardStyle: {
+            opacity: progress,
+          },
+        }),
+      }}
+    >
       <Stack.Screen
         name="ProfileMain"
         children={(props) => (
@@ -99,18 +123,11 @@ const ProfileStackNavigator = ({ userData, handleLogout }) => {
       />
     </Stack.Navigator>
   );
-}
+};
 
 const MainNavigator = ({ userData }) => {
-  const handleLogout = () => {
-    // ลบข้อมูลผู้ใช้จาก AsyncStorage ที่ auth service
-    import('../services/auth').then(({ logout }) => {
-      logout();
-      // เนื่องจาก checkAuth จะตรวจสอบใหม่ที่ AppNavigator จึงควรให้ reload app
-      // โดยตรงหรือใช้ context API เพื่อจัดการสถานะการล็อกอินแทน
-    });
-  };
-
+  const insets = useSafeAreaInsets();
+  
   // หน้าจอที่ไม่ควรแสดง Tab Bar
   const hiddenScreens = [
     "JobsScreen",
@@ -123,6 +140,16 @@ const MainNavigator = ({ userData }) => {
     "EditInfo",
     "ChatScreen"
   ];
+
+  const handleLogout = async () => {
+    try {
+      const { logout } = await import('../services/auth');
+      await logout();
+      // Context API จะจัดการสถานะการล็อกอินที่ AppNavigator
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -140,23 +167,39 @@ const MainNavigator = ({ userData }) => {
 
           return {
             headerShown: false,
+            tabBarHideOnKeyboard: true,
             tabBarStyle: [
               shouldHideTabBar ? { display: "none" } : {},
-              tw`bg-white border-t border-gray-300 shadow-md h-21`,
-            ],
-            tabBarIcon: ({ color, size }) => {
-              let iconName;
-              if (route.name === "HomeTab") {
-                iconName = "home";
-              } else if (route.name === "History") {
-                iconName = "history";
-              } else if (route.name === "ProfileTab") {
-                iconName = "account";
+              tw`bg-white border-t border-gray-200`,
+              {
+                height: 60 + (Platform.OS === 'ios' ? insets.bottom : 0),
+                paddingTop: 10,
+                paddingBottom: Platform.OS === 'ios' ? insets.bottom : 10,
+                shadowColor: "#000",
+                shadowOffset: {
+                  width: 0,
+                  height: -2,
+                },
+                shadowOpacity: 0.08,
+                shadowRadius: 3,
+                elevation: 5,
               }
+            ],
+            tabBarIcon: ({ color, size, focused }) => {
+              let iconName;
+              
+              if (route.name === "HomeTab") {
+                iconName = focused ? "home" : "home-outline";
+              } else if (route.name === "History") {
+                iconName = focused ? "history" : "history";
+              } else if (route.name === "ProfileTab") {
+                iconName = focused ? "account" : "account-outline";
+              }
+              
               return <Icon name={iconName} size={size} color={color} />;
             },
-            tabBarActiveTintColor: "#60B876",
-            tabBarInactiveTintColor: "gray",
+            tabBarActiveTintColor: COLORS.PRIMARY,
+            tabBarInactiveTintColor: COLORS.GRAY_600,
           };
         }}
       >
@@ -168,8 +211,13 @@ const MainNavigator = ({ userData }) => {
             tabBarLabel: ({ focused, color }) => (
               <Text
                 style={[
-                  { fontFamily: "Mitr-Regular", fontSize: 12, color },
-                  focused ? tw`text-green-500` : tw`text-gray-400`,
+                  { 
+                    fontFamily: FONTS.FAMILY.REGULAR, 
+                    fontSize: 12, 
+                    color,
+                    marginBottom: Platform.OS === 'ios' ? 0 : 5
+                  },
+                  focused ? tw`font-medium` : tw`font-normal`,
                 ]}
               >
                 หน้าหลัก
@@ -188,8 +236,13 @@ const MainNavigator = ({ userData }) => {
             tabBarLabel: ({ focused, color }) => (
               <Text
                 style={[
-                  { fontFamily: "Mitr-Regular", fontSize: 12, color },
-                  focused ? tw`text-green-500` : tw`text-gray-400`,
+                  { 
+                    fontFamily: FONTS.FAMILY.REGULAR, 
+                    fontSize: 12, 
+                    color,
+                    marginBottom: Platform.OS === 'ios' ? 0 : 5
+                  },
+                  focused ? tw`font-medium` : tw`font-normal`,
                 ]}
               >
                 ประวัติรับงาน
@@ -208,8 +261,13 @@ const MainNavigator = ({ userData }) => {
             tabBarLabel: ({ focused, color }) => (
               <Text
                 style={[
-                  { fontFamily: "Mitr-Regular", fontSize: 12, color },
-                  focused ? tw`text-green-500` : tw`text-gray-400`,
+                  { 
+                    fontFamily: FONTS.FAMILY.REGULAR, 
+                    fontSize: 12, 
+                    color,
+                    marginBottom: Platform.OS === 'ios' ? 0 : 5
+                  },
+                  focused ? tw`font-medium` : tw`font-normal`,
                 ]}
               >
                 โปรไฟล์

@@ -16,8 +16,21 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
+    // ปรับปรุงการตั้งชื่อไฟล์ให้เก็บข้อมูลตำแหน่งของรูปภาพ (หากมี)
+    const position = file.originalname.includes('front') ? 'front' : 
+                    file.originalname.includes('back') ? 'back' : 
+                    file.originalname.includes('left') ? 'left' : 
+                    file.originalname.includes('right') ? 'right' : '';
+    
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
+    let fileName = `${file.fieldname}-${uniqueSuffix}`;
+    
+    // เพิ่มตำแหน่งเข้าไปในชื่อไฟล์ถ้ามี
+    if (position) {
+      fileName += `-${position}`;
+    }
+    
+    cb(null, `${fileName}${path.extname(file.originalname)}`);
   },
 });
 
@@ -63,7 +76,9 @@ router.get("/fetch_image", fetchImage);
  *     parameters:
  *       - in: formData
  *         name: photos
- *         type: file
+ *         type: array
+ *         items:
+ *           type: file
  *         description: รูปภาพที่ต้องการอัปโหลด (สูงสุด 4 รูป)
  *         required: true
  *       - in: formData
@@ -101,7 +116,9 @@ router.post("/upload_before_service", upload.array("photos", 4), uploadBeforeSer
  *     parameters:
  *       - in: formData
  *         name: photos
- *         type: file
+ *         type: array
+ *         items:
+ *           type: file
  *         description: รูปภาพที่ต้องการอัปโหลด (สูงสุด 4 รูป)
  *         required: true
  *       - in: formData

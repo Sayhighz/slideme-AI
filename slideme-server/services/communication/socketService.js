@@ -181,167 +181,94 @@ const configureSocket = (server) => {
     });
   });
 
-  // Add utility methods to io object for server-initiated events
-
-  /**
-   * Send notification to a specific customer
-   * @param {number} customerId - Customer ID
-   * @param {string} event - Event name
-   * @param {Object} data - Event data
-   */
-  io.notifyCustomer = (customerId, event, data) => {
-    const socketId = connections.customers[customerId];
-    
-    if (socketId) {
-      io.to(socketId).emit(event, data);
-      logger.info('Notification sent to customer', { customerId, event });
-      return true;
-    }
-    
-    logger.info('Customer not connected for notification', { customerId, event });
-    return false;
-  };
-
-  /**
-   * Send notification to a specific driver
-   * @param {number} driverId - Driver ID
-   * @param {string} event - Event name
-   * @param {Object} data - Event data
-   */
-  io.notifyDriver = (driverId, event, data) => {
-    const socketId = connections.drivers[driverId];
-    
-    if (socketId) {
-      io.to(socketId).emit(event, data);
-      logger.info('Notification sent to driver', { driverId, event });
-      return true;
-    }
-    
-    logger.info('Driver not connected for notification', { driverId, event });
-    return false;
-  };
-
-  /**
-   * Send notification to all participants of a request
-   * @param {number} requestId - Request ID
-   * @param {string} event - Event name
-   * @param {Object} data - Event data
-   */
-  io.notifyRequestParticipants = (requestId, event, data) => {
-    const roomName = `request_${requestId}`;
-    io.to(roomName).emit(event, data);
-    logger.info('Notification sent to request participants', { requestId, event });
-    return true;
-  };
-
-  /**
-   * Send notification to all connected drivers
-   * @param {string} event - Event name
-   * @param {Object} data - Event data
-   * @returns {number} Number of drivers notified
-   */
-  io.notifyAllDrivers = (event, data) => {
-    const driverCount = Object.keys(connections.drivers).length;
-    
-    if (driverCount > 0) {
-      for (const socketId of Object.values(connections.drivers)) {
+  // Create a socketService object with utility methods
+  const socketService = {
+    /**
+     * Send notification to a specific customer
+     * @param {number} customerId - Customer ID
+     * @param {string} event - Event name
+     * @param {Object} data - Event data
+     */
+    notifyCustomer: (customerId, event, data) => {
+      const socketId = connections.customers[customerId];
+      
+      if (socketId) {
         io.to(socketId).emit(event, data);
+        logger.info('Notification sent to customer', { customerId, event });
+        return true;
       }
       
-      logger.info('Notification sent to all drivers', { driverCount, event });
+      logger.info('Customer not connected for notification', { customerId, event });
+      return false;
+    },
+
+    /**
+     * Send notification to a specific driver
+     * @param {number} driverId - Driver ID
+     * @param {string} event - Event name
+     * @param {Object} data - Event data
+     */
+    notifyDriver: (driverId, event, data) => {
+      const socketId = connections.drivers[driverId];
+      
+      if (socketId) {
+        io.to(socketId).emit(event, data);
+        logger.info('Notification sent to driver', { driverId, event });
+        return true;
+      }
+      
+      logger.info('Driver not connected for notification', { driverId, event });
+      return false;
+    },
+
+    /**
+     * Send notification to all participants of a request
+     * @param {number} requestId - Request ID
+     * @param {string} event - Event name
+     * @param {Object} data - Event data
+     */
+    notifyRequestParticipants: (requestId, event, data) => {
+      const roomName = `request_${requestId}`;
+      io.to(roomName).emit(event, data);
+      logger.info('Notification sent to request participants', { requestId, event });
+      return true;
+    },
+
+    /**
+     * Send notification to all connected drivers
+     * @param {string} event - Event name
+     * @param {Object} data - Event data
+     * @returns {number} Number of drivers notified
+     */
+    notifyAllDrivers: (event, data) => {
+      const driverCount = Object.keys(connections.drivers).length;
+      
+      if (driverCount > 0) {
+        for (const socketId of Object.values(connections.drivers)) {
+          io.to(socketId).emit(event, data);
+        }
+        
+        logger.info('Notification sent to all drivers', { driverCount, event });
+      }
+      
+      return driverCount;
+    },
+
+    /**
+     * Get connection statistics
+     * @returns {Object} Connection statistics
+     */
+    getConnectionStats: () => {
+      return {
+        totalConnections: Object.keys(connections.customers).length + Object.keys(connections.drivers).length,
+        customerConnections: Object.keys(connections.customers).length,
+        driverConnections: Object.keys(connections.drivers).length
+      };
     }
-    
-    return driverCount;
   };
 
-  /**
-   * Get connection statistics
-   * @returns {Object} Connection statistics
-   */
-  io.getConnectionStats = () => {
-    return {
-      totalConnections: Object.keys(connections.customers).length + Object.keys(connections.drivers).length,
-      customerConnections: Object.keys(connections.customers).length,
-      driverConnections: Object.keys(connections.drivers).length
-    };
-  };
-
-  return io;
+  // Return the socketService object
+  return socketService;
 };
-
-/**
- * Update driver location
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export const updateDriverLocation = async (req, res) => {
-    try {
-      const { driver_id, current_latitude, current_longitude } = req.body;
-  
-      // Validate required parameters
-      if (!driver_id || !current_latitude || !current_longitude) {
-        throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
-      }
-  
-      // Validate coordinates format
-      if (isNaN(parseFloat(current_latitude)) || isNaN(parseFloat(current_longitude))) {
-        throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_COORDINATES);
-      }
-  
-      // Update driver location in database
-      const result = await driverModel.updateDriverLocation(
-        driver_id,
-        current_latitude,
-        current_longitude
-      );
-  
-      if (!result) {
-        throw new NotFoundError(ERROR_MESSAGES.RESOURCE.NOT_FOUND);
-      }
-  
-      // Notify any active requests about driver location update
-      // Modified to check if socketService exists and has the method before calling it
-      try {
-        if (socketService && typeof socketService.emit === 'function') {
-          // Use standard emit if notifyDriverLocationUpdate is not available
-          socketService.emit('driverLocationUpdate', {
-            driver_id: driver_id,
-            latitude: parseFloat(current_latitude),
-            longitude: parseFloat(current_longitude),
-            timestamp: new Date().toISOString()
-          });
-          logger.info('Socket notification sent for driver location update', { driver_id });
-        } else {
-          logger.warn('Socket service not available for driver location update', { driver_id });
-        }
-      } catch (socketError) {
-        // Log but don't fail if socket notification fails
-        logger.error('Error sending socket notification', { 
-          error: socketError.message 
-        });
-      }
-  
-      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-        Location: {
-          driver_id,
-          latitude: parseFloat(current_latitude),
-          longitude: parseFloat(current_longitude),
-          updated_at: new Date().toISOString()
-        }
-      }, "อัปเดตตำแหน่งสำเร็จ"));
-    } catch (error) {
-      logger.error('Error updating driver location', { error: error.message });
-      
-      if (error instanceof ValidationError) {
-        return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
-      }
-      
-      if (error instanceof NotFoundError) {
-        return res.status(STATUS_CODES.NOT_FOUND).json(formatErrorResponse("ไม่พบคนขับหรือการอัปเดตล้มเหลว"));
-      }
-      
-      return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json(formatErrorResponse(ERROR_MESSAGES.GENERAL.SERVER_ERROR));
-    }
-  };
 
 export default configureSocket;
