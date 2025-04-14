@@ -195,14 +195,6 @@ const PersonalInfoScreen = ({ navigation, route }) => {
               icon="phone"
             />
             
-            {userInfo?.email && (
-              <InfoItem 
-                label="อีเมล" 
-                value={userInfo.email} 
-                icon="email"
-              />
-            )}
-            
             {userInfo?.id_number && (
               <InfoItem 
                 label="เลขบัตรประชาชน" 

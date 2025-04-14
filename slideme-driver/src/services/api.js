@@ -99,18 +99,51 @@ export const deleteRequest = async (path) => {
  * const result = await uploadFile('/api/upload', formData);
  * ```
  */
-export const uploadFile = async (path, formData) => {
+/**
+ * ส่ง POST request สำหรับอัปโหลดไฟล์ไปยัง API endpoint
+ * @param {string} path - เส้นทาง API (ไม่รวม base URL)
+ * @param {FormData} formData - ข้อมูล FormData ที่มีไฟล์ที่จะอัปโหลด
+ * @param {Object} options - ตัวเลือกเพิ่มเติมสำหรับการส่งคำขอ
+ * @returns {Promise<Object>} - ผลลัพธ์จาก API (data)
+ * @throws {Error} - ข้อผิดพลาดในกรณีที่ request ล้มเหลว
+ * 
+ * ตัวอย่างการใช้งาน:
+ * ```
+ * const formData = new FormData();
+ * formData.append('request_id', '123');
+ * formData.append('photos', {
+ *   uri: 'file:///path/to/image.jpg',
+ *   name: 'image.jpg',
+ *   type: 'image/jpeg'
+ * });
+ * const result = await uploadFile('/api/upload', formData);
+ * ```
+ */
+export const uploadFile = async (path, formData, options = {}) => {
   try {
-    const response = await api.post(path, formData, {
+    const defaultOptions = {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-    });
+    };
+    
+    const mergedOptions = {
+      ...defaultOptions,
+      ...options,
+      headers: {
+        ...defaultOptions.headers,
+        ...options.headers,
+      },
+    };
+    
+    const response = await api.post(path, formData, mergedOptions);
     return response.data;
   } catch (error) {
     console.error("Upload error:", error.response?.data || error.message);
     throw error;
   }
 };
+
+
 
 export default api;

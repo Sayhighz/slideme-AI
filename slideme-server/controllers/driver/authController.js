@@ -51,7 +51,6 @@ export const loginDriver = asyncHandler(async (req, res) => {
         first_name, 
         last_name,
         phone_number,
-        email,
         license_plate 
       FROM drivers 
       WHERE phone_number = ?`,
@@ -118,157 +117,6 @@ export const loginDriver = asyncHandler(async (req, res) => {
   }
 });
 
-/**
- * Register new driver
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export const registerDriver = asyncHandler(async (req, res) => {
-  const { 
-    phone_number, 
-    password, 
-    first_name, 
-    last_name, 
-    license_plate, 
-    license_number,
-    id_expiry_date,
-    province,
-    vehicletype_id,
-    email
-  } = req.body;
-
-  // Validate required fields
-  if (!phone_number || !password) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, [
-      'กรุณาใส่เบอร์โทรศัพท์และรหัสผ่าน'
-    ]);
-  }
-
-  // Validate phone number format
-  if (!validatePhoneNumber(phone_number)) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_PHONE, [
-      'เบอร์โทรศัพท์ไม่ถูกต้อง'
-    ]);
-  }
-
-  // Validate email if provided
-  if (email && !validateEmail(email)) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_EMAIL, [
-      'อีเมลไม่ถูกต้อง'
-    ]);
-  }
-
-  // Validate password strength
-  const passwordStrength = passwordService.checkPasswordStrength(password);
-  if (!passwordStrength.isStrong) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.WEAK_PASSWORD, [
-      passwordStrength.feedback
-    ]);
-  }
-
-  // Check if phone number already exists
-  try {
-    const existingDrivers = await db.query(
-      `SELECT driver_id FROM drivers WHERE phone_number = ?`,
-      [phone_number]
-    );
-
-    if (existingDrivers.length > 0) {
-      throw new ValidationError(ERROR_MESSAGES.RESOURCE.ALREADY_EXISTS, [
-        'เบอร์โทรศัพท์นี้ถูกใช้งานแล้ว'
-      ]);
-    }
-
-    // Begin transaction
-    const connection = await db.beginTransaction();
-
-    try {
-      // Hash password for security in production
-      // For now keeping direct password storage as in original code
-      // const hashedPassword = await passwordService.hashPassword(password);
-      
-      // Insert new driver
-      const insertSql = `
-        INSERT INTO drivers (
-          phone_number, 
-          password, 
-          first_name, 
-          last_name,
-          license_plate,
-          license_number,
-          id_expiry_date,
-          province,
-          vehicletype_id,
-          email,
-          created_date,
-          approval_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
-      `;
-
-      const values = [
-        phone_number,
-        password, // should be hashedPassword in production
-        first_name || null,
-        last_name || null,
-        license_plate || null,
-        license_number || null,
-        id_expiry_date || null,
-        province || "Unknown",
-        vehicletype_id || 99, // Default vehicle type
-        email || null,
-        APPROVAL_STATUS.PENDING
-      ];
-
-      const result = await db.transactionQuery(connection, insertSql, values);
-      const driverId = result.insertId;
-
-      // Create driverdetails record
-      const detailsSql = `INSERT INTO driverdetails (driver_id) VALUES (?)`;
-      await db.transactionQuery(connection, detailsSql, [driverId]);
-
-      // Commit transaction
-      await db.commitTransaction(connection);
-
-      // Send registration confirmation SMS and Email
-      try {
-        const driverName = `${first_name || ''} ${last_name || ''}`.trim();
-        
-        if (phone_number) {
-          smsService.sendDriverRegistrationSMS(phone_number, driverName);
-        }
-        
-        if (email) {
-          emailService.sendDriverRegistrationEmail({
-            driver_id: driverId,
-            email,
-            first_name,
-            last_name,
-            phone_number
-          });
-        }
-      } catch (notificationError) {
-        logger.error('Error sending registration notifications', { 
-          error: notificationError.message 
-        });
-        // Don't fail registration if notifications fail
-      }
-
-      return res.status(STATUS_CODES.CREATED).json(formatSuccessResponse({
-        driver_id: driverId,
-        approval_status: APPROVAL_STATUS.PENDING
-      }, "ลงทะเบียนสำเร็จ กรุณารอการตรวจสอบและอนุมัติจากทีมงาน"));
-    } catch (transactionError) {
-      await db.rollbackTransaction(connection);
-      throw transactionError;
-    }
-  } catch (error) {
-    if (error instanceof ValidationError) {
-      return res.status(STATUS_CODES.BAD_REQUEST).json(formatErrorResponse(error.message));
-    }
-    logger.error('Error during driver registration', { error: error.message });
-    throw new DatabaseError(ERROR_MESSAGES.DATABASE.QUERY_ERROR, error);
-  }
-});
 
 /**
  * Check driver registration status
@@ -343,7 +191,7 @@ export const requestPasswordReset = asyncHandler(async (req, res) => {
   try {
     // Check if user exists
     const drivers = await db.query(
-      `SELECT driver_id, email, first_name, last_name FROM drivers WHERE phone_number = ?`,
+      `SELECT driver_id, first_name, last_name FROM drivers WHERE phone_number = ?`,
       [phone_number]
     );
 
@@ -560,8 +408,6 @@ export const resetPassword = asyncHandler(async (req, res) => {
 
 export default {
   loginDriver,
-  registerDriver,
-  checkRegistrationStatus,
   requestPasswordReset,
   verifyResetCode,
   resetPassword

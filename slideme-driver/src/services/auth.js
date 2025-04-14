@@ -31,19 +31,82 @@ export const login = async (phoneNumber, password) => {
   };
 
 // ฟังก์ชันสำหรับการลงทะเบียน
+// ฟังก์ชันสำหรับการลงทะเบียน
 export const register = async (userData) => {
   try {
-    const response = await postRequest(API_ENDPOINTS.AUTH.REGISTER, userData);
-    if (response.Status) {
-        return response;
-      } else {
-        throw new Error(response.Error || "ลงทะเบียนไม่สำเร็จ");
+    // แยกข้อมูลที่ต้องอัปโหลดเป็นไฟล์ออกมา
+    const { profile_picture, documents, ...userInfo } = userData;
+    
+    // ถ้ามีไฟล์เอกสาร จะต้องสร้าง FormData สำหรับการอัปโหลด
+    if (documents && Object.values(documents).some(Boolean)) {
+      const formData = new FormData();
+      
+      // ใส่ข้อมูลทั่วไปลงใน FormData
+      Object.keys(userInfo).forEach(key => {
+        formData.append(key, userInfo[key]);
+      });
+      
+      // เพิ่มรูปโปรไฟล์ (ถ้ามี)
+      if (profile_picture) {
+        const uriParts = profile_picture.split('/');
+        const fileName = uriParts[uriParts.length - 1];
+        const fileType = fileName.split('.').pop();
+        
+        formData.append('profile_picture', {
+          uri: profile_picture,
+          name: fileName,
+          type: `image/${fileType}`
+        });
       }
-    } catch (error) {
-      console.error("Register error:", error);
-      throw error;
+      
+      // เพิ่มเอกสารต่างๆ
+      if (documents.driverLicense) {
+        appendFileToFormData(formData, documents.driverLicense, 'thai_driver_license');
+      }
+      
+      if (documents.vehicleWithPlate) {
+        appendFileToFormData(formData, documents.vehicleWithPlate, 'car_with_license_plate');
+      }
+      
+      if (documents.vehicleRegistration) {
+        appendFileToFormData(formData, documents.vehicleRegistration, 'vehicle_registration');
+      }
+      
+      // ส่งข้อมูลไปยัง API
+      const response = await postRequest(API_ENDPOINTS.AUTH.REGISTER, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        }
+      });
+      
+      return response;
+    } else {
+      // กรณีไม่มีเอกสาร ส่งข้อมูลทั่วไปเท่านั้น
+      const response = await postRequest(API_ENDPOINTS.AUTH.REGISTER, userInfo);
+      return response;
     }
-  };
+  } catch (error) {
+    console.error("Register error:", error);
+    throw error;
+  }
+};
+
+// ฟังก์ชันช่วยเพิ่มไฟล์ลงใน FormData
+const appendFileToFormData = (formData, uri, fieldName) => {
+  if (!uri) return;
+  
+  // แยกข้อมูลไฟล์
+  const uriParts = uri.split('/');
+  const fileName = uriParts[uriParts.length - 1];
+  const fileType = fileName.split('.').pop();
+  
+  // เพิ่มไฟล์ลงใน FormData
+  formData.append(fieldName, {
+    uri: uri,
+    name: fileName,
+    type: `image/${fileType}`
+  });
+};
   
   // ฟังก์ชันสำหรับการตรวจสอบการเข้าสู่ระบบ
   export const checkAuth = async () => {
@@ -66,3 +129,5 @@ export const register = async (userData) => {
       return false;
     }
   };
+
+  

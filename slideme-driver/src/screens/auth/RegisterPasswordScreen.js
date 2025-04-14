@@ -6,14 +6,18 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator
 } from 'react-native';
 import tw from 'twrnc';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import * as Animatable from 'react-native-animatable';
 
 // Import components
 import AuthHeader from '../../components/auth/AuthHeader';
 import AuthInput from '../../components/auth/AuthInput';
 import AuthButton from '../../components/auth/AuthButton';
+import PasswordStrengthMeter from '../../components/auth/PasswordStrengthMeter';
+import RegistrationSteps from '../../components/auth/RegistrationSteps';
 
 // Import services and constants
 import { register } from '../../services/auth';
@@ -27,32 +31,8 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [errors, setErrors] = useState({});
-
-  const getPasswordStrength = () => {
-    if (!password) return { label: '', color: '', strength: 0 };
-    
-    // Check password criteria
-    const hasMinLength = password.length >= 8;
-    const hasUpperCase = /[A-Z]/.test(password);
-    const hasLowerCase = /[a-z]/.test(password);
-    const hasNumber = /[0-9]/.test(password);
-    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-    
-    const criteria = [hasMinLength, hasUpperCase, hasLowerCase, hasNumber, hasSpecialChar];
-    const metCriteria = criteria.filter(Boolean).length;
-    
-    // Calculate password strength
-    if (metCriteria <= 2) {
-      return { label: 'อ่อน', color: 'text-red-500', strength: 25 };
-    } else if (metCriteria === 3) {
-      return { label: 'ปานกลาง', color: 'text-yellow-500', strength: 50 };
-    } else if (metCriteria === 4) {
-      return { label: 'ดี', color: 'text-blue-500', strength: 75 };
-    } else {
-      return { label: 'ดีมาก', color: 'text-green-500', strength: 100 };
-    }
-  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -79,7 +59,10 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
     setIsLoading(true);
     
     try {
-      // Prepare registration data from route params
+      // เตรียมข้อมูลสำหรับการลงทะเบียน
+      const documents = routeParams.documents || {};
+      
+      // ในกรณีที่มีการอัปโหลดรูปภาพ ต้องแปลงให้อยู่ในรูปแบบที่ส่งไปยัง API ได้
       const registrationData = {
         phone_number: routeParams.phoneNumber,
         password: password,
@@ -93,14 +76,21 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
         vehicle_type: routeParams.selectedVehicleType,
       };
       
+      // ถ้าในขั้นตอนการพัฒนา เรายังไม่มี API สำหรับอัปโหลดรูปภาพ
+      // เราแค่จำลองว่าการลงทะเบียนสำเร็จ
       const response = await register(registrationData);
       
       if (response.Status) {
-        Alert.alert(
-          'ลงทะเบียนสำเร็จ',
-          'บัญชีของคุณถูกสร้างขึ้นแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้',
-          [{ text: 'เข้าสู่ระบบ', onPress: () => navigation.navigate('Login') }]
-        );
+        setIsSuccess(true);
+        
+        // จำลองการโหลดข้อมูล (ตัวอย่าง)
+        setTimeout(() => {
+          Alert.alert(
+            'ลงทะเบียนสำเร็จ',
+            'บัญชีของคุณถูกสร้างขึ้นแล้ว คุณสามารถเข้าสู่ระบบได้เลย',
+            [{ text: 'เข้าสู่ระบบ', onPress: () => navigation.navigate('Login') }]
+          );
+        }, 1500);
       } else {
         Alert.alert('ข้อผิดพลาด', response.Error || MESSAGES.ERRORS.REGISTRATION);
       }
@@ -112,7 +102,47 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
     }
   };
 
-  const passwordStrength = getPasswordStrength();
+  // ถ้าการลงทะเบียนสำเร็จ แสดงหน้าจอสำเร็จ
+  if (isSuccess) {
+    return (
+      <SafeAreaView style={tw`flex-1 bg-white items-center justify-center px-6`}>
+        <Animatable.View 
+          animation="bounceIn" 
+          duration={1000}
+          style={tw`items-center`}
+        >
+          <View style={tw`w-24 h-24 rounded-full bg-[${COLORS.PRIMARY}] items-center justify-center mb-6`}>
+            <Icon name="check" size={60} color="#fff" />
+          </View>
+          
+          <Text style={{
+            fontFamily: FONTS.FAMILY.MEDIUM,
+            fontSize: FONTS.SIZE.XL,
+            ...tw`text-gray-800 text-center mb-3`,
+          }}>
+            ลงทะเบียนสำเร็จ!
+          </Text>
+          
+          <Text style={{
+            fontFamily: FONTS.FAMILY.REGULAR,
+            fontSize: FONTS.SIZE.M,
+            ...tw`text-gray-600 text-center mb-6`,
+          }}>
+            บัญชีของคุณได้รับการสร้างเรียบร้อยแล้ว
+          </Text>
+          
+          <ActivityIndicator size="small" color={COLORS.PRIMARY} />
+          <Text style={{
+            fontFamily: FONTS.FAMILY.REGULAR,
+            fontSize: FONTS.SIZE.S,
+            ...tw`text-gray-500 mt-2`,
+          }}>
+            กำลังนำคุณไปยังหน้าเข้าสู่ระบบ...
+          </Text>
+        </Animatable.View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={tw`flex-1 bg-white`}>
@@ -121,36 +151,36 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
         onBack={() => navigation.goBack()}
       />
       
+      <View style={tw`px-4 pt-4`}>
+        <RegistrationSteps 
+          currentStep={4} 
+          totalSteps={4}
+          stepTitles={['ข้อมูลเบื้องต้น', 'ข้อมูลส่วนตัว', 'อัปโหลดเอกสาร', 'ตั้งรหัสผ่าน']}
+        />
+      </View>
+      
       <ScrollView 
         contentContainerStyle={tw`p-6`}
         keyboardShouldPersistTaps="handled"
       >
         <View style={tw`mb-8`}>
           <Text style={{
-            fontFamily: FONTS.FAMILY.REGULAR,
+            fontFamily: FONTS.FAMILY.MEDIUM,
             fontSize: FONTS.SIZE.XL,
             ...tw`text-gray-800 text-center mb-2`,
           }}>
-            ยินดีด้วย!
+            ขั้นตอนสุดท้าย!
           </Text>
           
           <Text style={{
             fontFamily: FONTS.FAMILY.REGULAR,
             ...tw`text-gray-500 text-center`,
           }}>
-            บัญชีของคุณได้รับการยืนยันแล้ว
+            โปรดตั้งรหัสผ่านสำหรับบัญชีของคุณ
           </Text>
         </View>
         
         <View style={tw`mb-6`}>
-          <Text style={{
-            fontFamily: FONTS.FAMILY.REGULAR,
-            fontSize: FONTS.SIZE.L,
-            ...tw`text-gray-800 mb-4`,
-          }}>
-            สร้างรหัสผ่าน
-          </Text>
-          
           <View style={tw`relative`}>
             <AuthInput
               label="รหัสผ่าน"
@@ -174,47 +204,7 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
           </View>
           
           {/* Password strength indicator */}
-          {password && (
-            <View style={tw`mb-4`}>
-              <View style={tw`flex-row justify-between mb-1`}>
-                <Text style={{
-                  fontFamily: FONTS.FAMILY.REGULAR,
-                  fontSize: FONTS.SIZE.S,
-                  ...tw`text-gray-500`,
-                }}>
-                  ความปลอดภัย
-                </Text>
-                
-                <Text style={{
-                  fontFamily: FONTS.FAMILY.REGULAR,
-                  fontSize: FONTS.SIZE.S,
-                  ...tw`${passwordStrength.color}`,
-                }}>
-                  {passwordStrength.label}
-                </Text>
-              </View>
-              
-              <View style={tw`w-full h-1 bg-gray-200 rounded-full overflow-hidden`}>
-                <View 
-                  style={{
-                    ...tw`h-full`,
-                    backgroundColor: passwordStrength.strength >= 75 ? COLORS.PRIMARY : 
-                                    passwordStrength.strength >= 50 ? '#3498db' :
-                                    passwordStrength.strength >= 25 ? '#f1c40f' : '#e74c3c',
-                    width: `${passwordStrength.strength}%`,
-                  }}
-                />
-              </View>
-              
-              <Text style={{
-                fontFamily: FONTS.FAMILY.REGULAR,
-                fontSize: FONTS.SIZE.XS,
-                ...tw`text-gray-500 mt-1`,
-              }}>
-                รหัสผ่านควรมีอย่างน้อย 8 ตัวอักษร และประกอบด้วยตัวอักษรพิมพ์ใหญ่ ตัวอักษรพิมพ์เล็ก ตัวเลข และอักขระพิเศษ
-              </Text>
-            </View>
-          )}
+          <PasswordStrengthMeter password={password} />
           
           <View style={tw`relative`}>
             <AuthInput
@@ -240,7 +230,7 @@ const RegisterPasswordScreen = ({ navigation, route }) => {
         </View>
       </ScrollView>
       
-      <View style={tw`p-4 bg-white shadow-lg`}>
+      <View style={tw`p-4 bg-white border-t border-gray-200`}>
         <AuthButton
           title="ลงทะเบียน"
           onPress={handleRegister}

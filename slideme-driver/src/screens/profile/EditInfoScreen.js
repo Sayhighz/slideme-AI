@@ -22,7 +22,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getRequest, postRequest, uploadFile } from '../../services/api';
 import { API_ENDPOINTS, FONTS, COLORS, MESSAGES } from '../../constants';
 import { formatDate } from '../../utils/formatters';
-import { isValidEmail, isValidDate, isFutureDate, isValidLicensePlate } from '../../utils/validators';
+import { isValidDate, isFutureDate, isValidLicensePlate } from '../../utils/validators';
 import { IMAGE_URL } from '../../config';
 
 // Import Components
@@ -78,7 +78,6 @@ const EditInfoScreen = ({ navigation, route }) => {
   
   const [formData, setFormData] = useState({
     id_expiry_date: '',
-    email: '',
     license_plate: '',
     address: '',
   });
@@ -117,7 +116,6 @@ const EditInfoScreen = ({ navigation, route }) => {
           const user = response;
           setFormData({
             id_expiry_date: formatDate(user.id_expiry_date) || '',
-            email: user.email || '',
             license_plate: user.license_plate || '',
             address: user.address || '',
           });
@@ -146,11 +144,6 @@ const EditInfoScreen = ({ navigation, route }) => {
   // Validate form fields
   const validateForm = () => {
     const newErrors = {};
-    
-    // Validate email
-    if (formData.email && !isValidEmail(formData.email)) {
-      newErrors.email = 'รูปแบบอีเมลไม่ถูกต้อง';
-    }
     
     // Validate expiry date
     if (formData.id_expiry_date) {
@@ -339,16 +332,6 @@ const EditInfoScreen = ({ navigation, route }) => {
             {/* Form Section */}
             <View style={styles.formContainer}>
               <Text style={styles.sectionTitle}>ข้อมูลส่วนตัว</Text>
-              
-              <InputField
-                label="อีเมล (ถ้ามี)"
-                value={formData.email}
-                onChangeText={(text) => handleInputChange('email', text)}
-                placeholder="example@email.com"
-                keyboardType="email-address"
-                error={errors.email}
-                icon="email-outline"
-              />
               
               
               <Text style={styles.sectionTitle}>ข้อมูลยานพาหนะ</Text>

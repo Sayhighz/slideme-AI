@@ -31,11 +31,9 @@ export const getDriverProfile = asyncHandler(async (req, res) => {
     SELECT 
       d.driver_id,
       d.phone_number,
-      d.email,
       d.first_name,
       d.last_name,
       d.license_plate,
-      d.license_number,
       d.id_expiry_date,
       d.province,
       d.approval_status,
@@ -58,11 +56,6 @@ export const getDriverProfile = asyncHandler(async (req, res) => {
 
   // Format the response data
   const driver = result[0];
-  
-  // Mask sensitive data
-  if (driver.license_number) {
-    driver.license_number_masked = maskString(driver.license_number, 4, 4);
-  }
 
   if (driver.phone_number) {
     driver.phone_number_masked = maskString(driver.phone_number, 3, 3);
@@ -95,7 +88,6 @@ export const getDriverProfile = asyncHandler(async (req, res) => {
 export const updateDriverProfile = asyncHandler(async (req, res) => {
   const { 
     driver_id, 
-    email, 
     first_name, 
     last_name, 
     license_plate, 
@@ -112,10 +104,6 @@ export const updateDriverProfile = asyncHandler(async (req, res) => {
   const updateFields = [];
   const updateValues = [];
 
-  if (email !== undefined) {
-    updateFields.push("email = ?");
-    updateValues.push(email);
-  }
 
   if (first_name !== undefined) {
     updateFields.push("first_name = ?");
