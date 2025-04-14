@@ -41,6 +41,7 @@ import driverLocationRoutes from './routes/driver/locationRoutes.js';
 import driverRequestRoutes from './routes/driver/requestRoutes.js';
 import driverOfferRoutes from './routes/driver/offerRoutes.js';
 import driverEarningRoutes from './routes/driver/earningRoutes.js';
+import driverRegistrationRoute from './routes/driver/registrationRoutes.js'
 
 dotenv.config();
 
@@ -90,6 +91,7 @@ app.use(`${DRIVER_PREFIX}/location`, driverLocationRoutes);
 app.use(`${DRIVER_PREFIX}/request`, driverRequestRoutes);
 app.use(`${DRIVER_PREFIX}/offer`, driverOfferRoutes);
 app.use(`${DRIVER_PREFIX}/earning`, driverEarningRoutes);
+app.use(`${DRIVER_PREFIX}/registration`, driverRegistrationRoute);
 
 app.use((req, res, next) => {
   res.status(404).json({ Status: false, Error: 'Route not found' });
@@ -112,7 +114,7 @@ const startServer = async () => {
       logger.info('API Routes structure:');
       logger.info(`- Common Routes: ${API_PREFIX}/upload, ${API_PREFIX}/notification`);
       logger.info(`- Customer Routes: ${CUSTOMER_PREFIX}/{auth, request, review, payment, address, profile}`);
-      logger.info(`- Driver Routes: ${DRIVER_PREFIX}/{auth, profile, location, request, offer, earning}`);
+      logger.info(`- Driver Routes: ${DRIVER_PREFIX}/{auth, profile, location, request, offer, earning, register}`);
     });
   } catch (error) {
     logger.error('Failed to start server', { error: error.message });
