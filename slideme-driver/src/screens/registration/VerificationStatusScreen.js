@@ -24,9 +24,10 @@ import AuthButton from '../../components/auth/AuthButton';
 import { FONTS, COLORS, MESSAGES } from '../../constants';
 import { getRequest } from '../../services/api';
 import { API_ENDPOINTS } from '../../constants';
+import { login } from '../../services/auth';
 
 const VerificationStatusScreen = ({ navigation, route }) => {
-  const { driverId, phoneNumber, name, registrationData } = route.params || {};
+  const { driverId, phoneNumber, name, password } = route.params || {};
   
   const [status, setStatus] = useState('pending');
   const [isLoading, setIsLoading] = useState(false);
@@ -55,17 +56,14 @@ const VerificationStatusScreen = ({ navigation, route }) => {
         if (response.approval_status === 'approved') {
           Alert.alert(
             'ได้รับการอนุมัติแล้ว!',
-            'การสมัครของคุณได้รับการอนุมัติแล้ว คุณสามารถสร้างรหัสผ่านเพื่อเริ่มใช้งานได้ทันที',
-            [
-              {
-                text: 'สร้างรหัสผ่าน',
-                onPress: () => navigation.navigate('CreatePassword', { 
-                  driverId: response.driver_id,
-                  phoneNumber
-                })
-              }
-            ]
+            'การสมัครของคุณได้รับการอนุมัติแล้ว คุณสามารถเริ่มใช้งานได้ทันที'
           );
+          console.log(phoneNumber, password)
+          login(phoneNumber, password);
+          if (__DEV__) {
+            const DevSettings = require('react-native').DevSettings;
+            DevSettings.reload();
+          }
         }
       } else {
         Alert.alert(
@@ -175,10 +173,8 @@ const VerificationStatusScreen = ({ navigation, route }) => {
               fontSize: FONTS.SIZE.M,
               ...tw`text-gray-600 text-center mb-4`,
             }}>
-              {status === 'approved' 
-                ? 'คุณสามารถสร้างรหัสผ่านและเริ่มใช้งานได้ทันที' 
-                : status === 'rejected'
-                ? 'การลงทะเบียนถูกปฏิเสธ กรุณาติดต่อฝ่ายสนับสนุน'
+              {status === 'rejected' 
+                ? 'การลงทะเบียนถูกปฏิเสธ กรุณาติดต่อฝ่ายสนับสนุน' 
                 : 'ขอบคุณสำหรับการลงทะเบียน เราจะตรวจสอบข้อมูลของคุณและแจ้งผลให้ทราบ'}
             </Text>
             
@@ -337,22 +333,20 @@ const VerificationStatusScreen = ({ navigation, route }) => {
       
       <View style={tw`px-4 py-4 bg-white border-t border-gray-200`}>
         {status === 'approved' ? (
-          <AuthButton
-            title="สร้างรหัสผ่าน"
-            onPress={goToCreatePassword}
-          />
+          <View style={tw`flex-row`}>
+            <AuthButton
+              title="กลับหน้าแรก"
+              onPress={exitRegistration}
+              secondary
+              style="flex-1"
+            />
+          </View>
         ) : status === 'rejected' ? (
           <View style={tw`flex-row`}>
             <AuthButton
               title="ติดต่อเจ้าหน้าที่"
               onPress={contactSupport}
               style="mr-2 flex-1"
-            />
-            <AuthButton
-              title="กลับหน้าแรก"
-              onPress={exitRegistration}
-              secondary
-              style="ml-2 flex-1"
             />
           </View>
         ) : (

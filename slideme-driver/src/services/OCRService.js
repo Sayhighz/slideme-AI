@@ -1,4 +1,4 @@
-// src/services/OCRService.js - Updated with driver license and license plate support
+// src/services/OCRService.js - Updated with better error handling
 import axios from 'axios';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
@@ -9,19 +9,47 @@ class OCRService {
   constructor() {
     this.API_BASE_URL = 'https://api.iapp.co.th';
     this.API_KEY = OCR_API_KEY; // ในการใช้งานจริงควรเก็บใน environment variables หรือ config
+    this.TIMEOUT = 30000; // 30 วินาที
   }
 
   // แปลงไฟล์เป็น FormData
   async createFormData(uri, apiEndpoint) {
-    // สำหรับ Android จำเป็นต้องทำการอ่านไฟล์เป็น base64 เพื่อไม่ให้เกิดปัญหา
-    if (Platform.OS === 'android') {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      return this._createFormDataFromBase64(base64, apiEndpoint);
+    // ตรวจสอบว่า uri ถูกต้องหรือไม่
+    if (!uri) {
+      throw new Error('URI ของรูปภาพไม่ถูกต้อง');
     }
 
-    // สำหรับ iOS สามารถส่ง URI ได้โดยตรง
+    try {
+      // ตรวจสอบว่าไฟล์มีอยู่จริงหรือไม่
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (!fileInfo.exists) {
+        throw new Error('ไม่พบไฟล์รูปภาพ');
+      }
+
+      // สำหรับ Android จำเป็นต้องทำการอ่านไฟล์เป็น base64 เพื่อไม่ให้เกิดปัญหา
+      if (Platform.OS === 'android') {
+        try {
+          const base64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          return this._createFormDataFromBase64(base64, apiEndpoint);
+        } catch (readError) {
+          console.error('Error reading file as base64:', readError);
+          // ถ้าเกิดข้อผิดพลาดในการอ่านเป็น base64 ให้ลองส่ง URI โดยตรง
+          return this._createFormDataFromUri(uri, apiEndpoint);
+        }
+      }
+
+      // สำหรับ iOS สามารถส่ง URI ได้โดยตรง
+      return this._createFormDataFromUri(uri, apiEndpoint);
+    } catch (error) {
+      console.error('Error creating form data:', error);
+      throw new Error(`ไม่สามารถเตรียมข้อมูลรูปภาพได้: ${error.message}`);
+    }
+  }
+
+  // แปลงข้อมูล URI เป็น FormData
+  _createFormDataFromUri(uri, apiEndpoint) {
     const formData = new FormData();
     const filename = uri.split('/').pop();
     const match = /\.(\w+)$/.exec(filename);
@@ -59,6 +87,7 @@ class OCRService {
             'Content-Type': 'multipart/form-data',
             'apikey': this.API_KEY,
           },
+          timeout: this.TIMEOUT,
         }
       );
 
@@ -102,7 +131,7 @@ class OCRService {
       console.error('เกิดข้อผิดพลาดในการอ่านบัตรประชาชน:', error);
       return {
         success: false,
-        error: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ API',
+        error: this._formatErrorMessage(error),
       };
     }
   }
@@ -119,6 +148,7 @@ class OCRService {
             'Content-Type': 'multipart/form-data',
             'apikey': this.API_KEY,
           },
+          timeout: this.TIMEOUT,
         }
       );
 
@@ -157,7 +187,7 @@ class OCRService {
       console.error('เกิดข้อผิดพลาดในการอ่านใบขับขี่:', error);
       return {
         success: false,
-        error: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ API',
+        error: this._formatErrorMessage(error),
       };
     }
   }
@@ -174,6 +204,7 @@ class OCRService {
             'Content-Type': 'multipart/form-data',
             'apikey': this.API_KEY,
           },
+          timeout: this.TIMEOUT,
         }
       );
 
@@ -211,8 +242,25 @@ class OCRService {
       console.error('เกิดข้อผิดพลาดในการอ่านป้ายทะเบียน:', error);
       return {
         success: false,
-        error: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ API',
+        error: this._formatErrorMessage(error),
       };
+    }
+  }
+
+  // ฟอร์แมตข้อความข้อผิดพลาด
+  _formatErrorMessage(error) {
+    if (error.response) {
+      // ข้อผิดพลาดจาก API response
+      return error.response.data?.message || error.response.data?.error || 'เกิดข้อผิดพลาดจาก API';
+    } else if (error.request) {
+      // ข้อผิดพลาดจากการเชื่อมต่อ
+      if (error.code === 'ECONNABORTED') {
+        return 'การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองอีกครั้ง';
+      }
+      return 'ไม่สามารถเชื่อมต่อกับ API ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต';
+    } else {
+      // ข้อผิดพลาดอื่นๆ
+      return error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
     }
   }
 
@@ -293,6 +341,22 @@ class OCRService {
     const lastName = parts.length > 2 ? parts.slice(2).join(' ') : '';
     
     return { title, firstName, lastName };
+  }
+
+  // ตรวจสอบว่า API พร้อมใช้งานหรือไม่
+  async checkAPIStatus() {
+    try {
+      const response = await axios.get(`${this.API_BASE_URL}/health`, {
+        timeout: 5000,
+        headers: {
+          'apikey': this.API_KEY
+        }
+      });
+      return response.status === 200;
+    } catch (error) {
+      console.error('API status check failed:', error.message);
+      return false;
+    }
   }
 }
 

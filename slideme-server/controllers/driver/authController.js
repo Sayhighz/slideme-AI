@@ -73,12 +73,14 @@ export const loginDriver = asyncHandler(async (req, res) => {
     }
 
     // Check approval status
+    
     if (driver.approval_status !== APPROVAL_STATUS.APPROVED) {
-      return res.status(STATUS_CODES.FORBIDDEN).json({ 
-        Status: false, 
-        Error: ERROR_MESSAGES.AUTH.ACCOUNT_NOT_APPROVED,
-        ApprovalStatus: driver.approval_status
-      });
+      return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+        driver_id: driver.driver_id,
+        first_name: driver.first_name,
+        last_name: driver.last_name,
+        phone_number: driver.phone_number,
+      }, ERROR_MESSAGES.AUTH.ACCOUNT_NOT_APPROVED));
     }
 
     // Generate JWT token

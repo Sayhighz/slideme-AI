@@ -1,9 +1,9 @@
 // แยกการ config ออกมา และรวบรวมไว้ที่นี่
 
 // URL ของ API
-export const API_URL = "http://192.168.1.101:4000/api/v1"; // แทนที่ด้วย IP address จริง
-// export const OCR_API_KEY = "ba6jnKt6PlRxkT8gl1HjcZqotXHhaaPt"
-export const OCR_API_KEY = "demo"
+export const API_URL = "http://192.168.1.117:4000/api/v1"; // แทนที่ด้วย IP address จริง
+export const OCR_API_KEY = "ba6jnKt6PlRxkT8gl1HjcZqotXHhaaPt"
+// export const OCR_API_KEY = "demo"
 
 // URL ของ Socket
 export const SOCKET_URL = API_URL;

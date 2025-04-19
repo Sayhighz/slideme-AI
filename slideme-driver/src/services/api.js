@@ -6,12 +6,14 @@ import { API_URL } from "../config";
  * สร้าง Axios instance ที่มีการตั้งค่าเริ่มต้น
  * - baseURL: ใช้จาก config ไฟล์
  * - headers: ตั้งค่า Content-Type เป็น application/json
+ * - timeout: ตั้งค่า timeout เพื่อป้องกันการทำงานค้าง
  */
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 30000, // 30 วินาที
 });
 
 /**
@@ -25,6 +27,16 @@ export const getRequest = async (path) => {
     const response = await api.get(path);
     return response.data;
   } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      console.error("GET request timeout:", path);
+      throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
+    if (error.message === 'Network Error') {
+      console.error("GET network error:", path);
+      throw new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
     console.error("GET request error:", error.response?.data || error.message);
     throw error;
   }
@@ -42,6 +54,16 @@ export const postRequest = async (path, body) => {
     const response = await api.post(path, body);
     return response.data;
   } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      console.error("POST request timeout:", path);
+      throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
+    if (error.message === 'Network Error') {
+      console.error("POST network error:", path, body);
+      throw new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
     console.error("POST request error:", error.response?.data || error.message);
     throw error;
   }
@@ -59,6 +81,16 @@ export const putRequest = async (path, body) => {
     const response = await api.put(path, body);
     return response.data;
   } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      console.error("PUT request timeout:", path);
+      throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
+    if (error.message === 'Network Error') {
+      console.error("PUT network error:", path, body);
+      throw new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
     console.error("PUT request error:", error.response?.data || error.message);
     throw error;
   }
@@ -75,6 +107,16 @@ export const deleteRequest = async (path) => {
     const response = await api.delete(path);
     return response.data;
   } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      console.error("DELETE request timeout:", path);
+      throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
+    if (error.message === 'Network Error') {
+      console.error("DELETE network error:", path);
+      throw new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
     console.error("DELETE request error:", error.response?.data || error.message);
     throw error;
   }
@@ -84,40 +126,9 @@ export const deleteRequest = async (path) => {
  * ส่ง POST request สำหรับอัปโหลดไฟล์ไปยัง API endpoint
  * @param {string} path - เส้นทาง API (ไม่รวม base URL)
  * @param {FormData} formData - ข้อมูล FormData ที่มีไฟล์ที่จะอัปโหลด
- * @returns {Promise<Object>} - ผลลัพธ์จาก API (data)
- * @throws {Error} - ข้อผิดพลาดในกรณีที่ request ล้มเหลว
- * 
- * ตัวอย่างการใช้งาน:
- * ```
- * const formData = new FormData();
- * formData.append('request_id', '123');
- * formData.append('photos', {
- *   uri: 'file:///path/to/image.jpg',
- *   name: 'image.jpg',
- *   type: 'image/jpeg'
- * });
- * const result = await uploadFile('/api/upload', formData);
- * ```
- */
-/**
- * ส่ง POST request สำหรับอัปโหลดไฟล์ไปยัง API endpoint
- * @param {string} path - เส้นทาง API (ไม่รวม base URL)
- * @param {FormData} formData - ข้อมูล FormData ที่มีไฟล์ที่จะอัปโหลด
  * @param {Object} options - ตัวเลือกเพิ่มเติมสำหรับการส่งคำขอ
  * @returns {Promise<Object>} - ผลลัพธ์จาก API (data)
  * @throws {Error} - ข้อผิดพลาดในกรณีที่ request ล้มเหลว
- * 
- * ตัวอย่างการใช้งาน:
- * ```
- * const formData = new FormData();
- * formData.append('request_id', '123');
- * formData.append('photos', {
- *   uri: 'file:///path/to/image.jpg',
- *   name: 'image.jpg',
- *   type: 'image/jpeg'
- * });
- * const result = await uploadFile('/api/upload', formData);
- * ```
  */
 export const uploadFile = async (path, formData, options = {}) => {
   try {
@@ -125,6 +136,7 @@ export const uploadFile = async (path, formData, options = {}) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 60000, // 60 วินาที สำหรับการอัปโหลดไฟล์
     };
     
     const mergedOptions = {
@@ -139,11 +151,30 @@ export const uploadFile = async (path, formData, options = {}) => {
     const response = await api.post(path, formData, mergedOptions);
     return response.data;
   } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      console.error("Upload timeout:", path);
+      throw new Error('การอัปโหลดใช้เวลานานเกินไป กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
+    if (error.message === 'Network Error') {
+      console.error("Upload network error:", path);
+      throw new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    
     console.error("Upload error:", error.response?.data || error.message);
     throw error;
   }
 };
 
-
+// เพิ่มตัวจัดการ Network Connection state
+export const checkNetworkConnection = async () => {
+  try {
+    await api.get('/health', { timeout: 5000 });
+    return true;
+  } catch (error) {
+    console.error("Network connection check failed:", error.message);
+    return false;
+  }
+};
 
 export default api;

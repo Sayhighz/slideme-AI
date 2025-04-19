@@ -2,7 +2,7 @@
  * Driver registration routes
  */
 import express from 'express';
-import { registerDriver, checkRegistrationStatus } from '../../controllers/driver/registrationController.js';
+import { registerDriver, checkRegistrationStatus, checkPhoneNumber } from '../../controllers/driver/registrationController.js';
 import { configureDriverUpload, handleDriverUploadErrors } from '../../middleware/driverUploadMiddleware.js';
 
 const router = express.Router();
@@ -116,5 +116,8 @@ router.post('/register', configureDriverUpload, handleDriverUploadErrors, regist
  *         description: เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์
  */
 router.get('/check-status', checkRegistrationStatus);
+
+// check phoneNumber exists?
+router.get('/check-phone-number', checkPhoneNumber);
 
 export default router;

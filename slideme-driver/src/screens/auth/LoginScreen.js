@@ -53,6 +53,17 @@ const handleLogin = async () => {
   setIsLoading(true);
   try {
     const response = await login(phoneNumber, password);
+    console.log(response)
+    if (response.Message === 'บัญชีของคุณยังไม่ได้รับการอนุมัติ') {
+      navigation.navigate('Register', { screen: 'VerificationStatus' , params:{
+        driverId: response.driver_id,
+        phoneNumber: phoneNumber,
+        name: `${response.first_name} ${response.last_name}`,
+        password: password
+      }});
+
+    }
+
     
     if (response.Status && response.token) {
       Alert.alert('สำเร็จ', MESSAGES.SUCCESS.LOGIN);

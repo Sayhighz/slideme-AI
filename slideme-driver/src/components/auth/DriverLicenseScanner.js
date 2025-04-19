@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import tw from 'twrnc';
@@ -45,12 +46,13 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
           return;
         }
         
-        // เปิดกล้อง
+        // เปิดกล้อง - แก้ไขการใช้ mediaTypes เป็น string แทน enum
         result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: "Images",
           allowsEditing: true,
           aspect: [4, 3],
-          quality: 1,
+          quality: 0.8, // ลดคุณภาพลงเล็กน้อยเพื่อลดขนาดไฟล์
+          exif: false, // ไม่ต้องการข้อมูล exif เพื่อลดขนาดไฟล์
         });
       } else {
         // ขออนุญาตเข้าถึงแกลเลอรี่
@@ -63,17 +65,32 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
           return;
         }
         
-        // เปิดแกลเลอรี่
+        // เปิดแกลเลอรี่ - แก้ไขการใช้ mediaTypes เป็น string แทน enum
         result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: "Images",
           allowsEditing: true,
           aspect: [4, 3],
-          quality: 1,
+          quality: 0.8, // ลดคุณภาพลงเล็กน้อยเพื่อลดขนาดไฟล์
+          exif: false, // ไม่ต้องการข้อมูล exif เพื่อลดขนาดไฟล์
         });
       }
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedImage = result.assets[0];
+        
+        // ตรวจสอบว่า URI ถูกต้องหรือไม่
+        if (!selectedImage.uri) {
+          throw new Error('ไม่พบ URI ของรูปภาพ');
+        }
+        
+        // เพิ่มการตรวจสอบว่า URI มีรูปแบบที่ถูกต้องหรือไม่
+        if (Platform.OS === 'android' && !selectedImage.uri.startsWith('file://') && !selectedImage.uri.startsWith('content://')) {
+          // เสริมด้วย file:// สำหรับ Android ถ้าจำเป็น
+          selectedImage.uri = `file://${selectedImage.uri}`;
+        }
+        
+        console.log('Selected image URI:', selectedImage.uri);
+        
         setImageUri(selectedImage.uri);
         
         // ส่ง URI ของรูปภาพกลับไปให้ parent component
@@ -87,7 +104,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
       console.error('Error selecting image:', error);
       Alert.alert(
         'ข้อผิดพลาด',
-        'เกิดข้อผิดพลาดในการเลือกรูปภาพ โปรดลองอีกครั้ง'
+        `เกิดข้อผิดพลาดในการเลือกรูปภาพ: ${error.message || 'โปรดลองอีกครั้ง'}`
       );
     }
   };
@@ -106,7 +123,16 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
     setPreviewVisible(false);
     
     try {
-      const result = await OCRService.readThaiDriverLicense(imageUri);
+      // สร้าง timeout เพื่อป้องกันการทำงานค้าง
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('การสแกนใช้เวลานานเกินไป')), 30000)
+      );
+      
+      // ทำการสแกนพร้อมตั้งค่า timeout
+      const result = await Promise.race([
+        OCRService.readThaiDriverLicense(imageUri),
+        timeoutPromise
+      ]);
       
       if (result.success) {
         // เรียกฟังก์ชัน callback พร้อมส่งข้อมูลที่อ่านได้
@@ -128,7 +154,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
       console.error('Error scanning driver license:', error);
       Alert.alert(
         'ข้อผิดพลาด',
-        'เกิดข้อผิดพลาดในการสแกนใบขับขี่ โปรดลองอีกครั้ง'
+        `เกิดข้อผิดพลาดในการสแกนใบขับขี่: ${error.message || 'โปรดลองอีกครั้ง'}`
       );
     } finally {
       setScanning(false);
@@ -175,6 +201,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 style={tw`flex-1 py-2 mr-2 flex-row items-center justify-center bg-gray-100 rounded-lg border border-gray-300`}
                 onPress={() => pickImage(false)}
                 disabled={scanning}
+                activeOpacity={0.7}
               >
                 <Icon name="image-refresh" size={20} color={COLORS.GRAY_700} style={tw`mr-1`} />
                 <Text style={{
@@ -192,6 +219,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 ]}
                 onPress={scanDriverLicense}
                 disabled={scanning}
+                activeOpacity={0.7}
               >
                 <Icon name="text-recognition" size={20} color="#fff" style={tw`mr-1`} />
                 <Text style={{
@@ -212,6 +240,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
               ]}
               onPress={() => pickImage(true)}
               disabled={scanning}
+              activeOpacity={0.7}
             >
               <Icon name="camera" size={20} color="#fff" style={tw`mr-1`} />
               <Text style={{
@@ -229,6 +258,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
               ]}
               onPress={() => pickImage(false)}
               disabled={scanning}
+              activeOpacity={0.7}
             >
               <Icon name="image" size={20} color={COLORS.GRAY_700} style={tw`mr-1`} />
               <Text style={{
@@ -271,7 +301,10 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
               }}>
                 ตรวจสอบรูปภาพ
               </Text>
-              <TouchableOpacity onPress={cancelScan}>
+              <TouchableOpacity 
+                onPress={cancelScan}
+                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              >
                 <Icon name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -297,6 +330,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 <TouchableOpacity
                   style={tw`flex-1 py-3 bg-gray-200 rounded-lg mr-2 items-center`}
                   onPress={cancelScan}
+                  activeOpacity={0.7}
                 >
                   <Text style={{
                     fontFamily: FONTS.FAMILY.REGULAR,
@@ -312,6 +346,7 @@ const DriverLicenseScanner = ({ onScanSuccess, onImageSelected, style }) => {
                     { backgroundColor: COLORS.PRIMARY }
                   ]}
                   onPress={scanDriverLicense}
+                  activeOpacity={0.7}
                 >
                   <Text style={{
                     fontFamily: FONTS.FAMILY.REGULAR,

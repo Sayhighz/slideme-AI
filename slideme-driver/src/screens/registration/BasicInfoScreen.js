@@ -22,10 +22,10 @@ import CustomDropdown from '../../components/auth/CustomDropdown';
 import RegistrationSteps from '../../components/auth/RegistrationSteps';
 
 // Import services and constants
-import { postRequest } from '../../services/api';
 import { API_ENDPOINTS, FONTS, COLORS, MESSAGES } from '../../constants';
+import { checkPhoneNumberExists } from '../../services/auth';
 
-// กำหนดค่า PROVINCES และ VEHICLE_TYPES แบบ hardcode เพื่อให้แน่ใจว่ามีค่าถูกต้อง
+// Hardcoded PROVINCES and VEHICLE_TYPES to ensure correctness
 const PROVINCES = [
   { label: "กรุงเทพมหานคร", value: "bangkok" },
   { label: "เชียงใหม่", value: "chiangmai" },
@@ -44,10 +44,10 @@ const PROVINCES = [
 ];
 
 const VEHICLE_TYPES = [
-  { label: "รถสไลด์มาตรฐาน", value: "standard_slide" },
-  { label: "รถสไลด์ขนาดใหญ่", value: "heavy_duty_slide" },
-  { label: "รถสไลด์สำหรับรถหรู", value: "luxury_slide" },
-  { label: "รถสไลด์ฉุกเฉิน", value: "emergency_slide" }
+  { label: "รถสไลด์มาตรฐาน", value: 1 },
+  { label: "รถสไลด์ขนาดใหญ่", value: 2 },
+  { label: "รถสไลด์สำหรับรถหรู", value: 3 },
+  { label: "รถสไลด์ฉุกเฉิน", value: 4 }
 ];
 
 const BasicInfoScreen = ({ navigation }) => {
@@ -57,75 +57,87 @@ const BasicInfoScreen = ({ navigation }) => {
   const [isAcceptTerms, setIsAcceptTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  
+  // New states for password and password confirmation
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const validateForm = () => {
     const newErrors = {};
-    
+
+    // Existing validations
     if (!phoneNumber) {
       newErrors.phoneNumber = { message: 'กรุณากรอกเบอร์โทรศัพท์' };
     } else if (!/^[0-9]{10}$/.test(phoneNumber)) {
       newErrors.phoneNumber = { message: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
     }
-    
+
     if (!selectedProvince) {
       newErrors.province = { message: 'กรุณาเลือกจังหวัด' };
     }
-    
+
     if (!selectedVehicleType) {
       newErrors.vehicleType = { message: 'กรุณาเลือกประเภทรถ' };
     }
-    
+
     if (!isAcceptTerms) {
       newErrors.terms = { message: 'กรุณายอมรับเงื่อนไข' };
     }
-    
+
+    // New password validations
+    if (!password) {
+      newErrors.password = { message: 'กรุณากรอกรหัสผ่าน' };
+    } else if (password.length < 6) {
+      newErrors.password = { message: 'รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร' };
+    }
+
+    if (!confirmPassword) {
+      newErrors.confirmPassword = { message: 'กรุณายืนยันรหัสผ่าน' };
+    } else if (confirmPassword !== password) {
+      newErrors.confirmPassword = { message: 'รหัสผ่านไม่ตรงกัน' };
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  // ตรวจสอบว่าเบอร์โทรศัพท์มีในระบบหรือไม่
-  const checkPhoneNumberExists = async () => {
-    try {
-      const response = await postRequest(API_ENDPOINTS.AUTH.CHECK_PHONE, {
-        phone_number: phoneNumber
-      });
-      
-      return response.Exists;
-    } catch (error) {
-      console.error('Error checking phone number:', error);
-      Alert.alert('ข้อผิดพลาด', MESSAGES.ERRORS.CONNECTION);
-      return false;
-    }
-  };
-
-  // เมื่อกดปุ่มยอมรับเงื่อนไข
+  // Handle the "Accept Terms" button toggle
   const handleAcceptTerms = () => {
     setIsAcceptTerms(!isAcceptTerms);
   };
 
-  // เมื่อกดปุ่มถัดไป
+  // Handle the "Next" button click
   const handleNext = async () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      console.log("Form validation failed");
+      return;
+    }
     
     setIsLoading(true);
+    console.log("Checking phone number:", phoneNumber);
     
     try {
+      console.log("About to call checkPhoneNumberExists API");
       // ตรวจสอบว่าเบอร์โทรศัพท์มีในระบบหรือไม่
-      const phoneExists = await checkPhoneNumberExists();
+      const canRegister = await checkPhoneNumberExists(phoneNumber);
+      console.log("API response (canRegister):", canRegister);
       
-      if (phoneExists) {
-        setErrors({ phoneNumber: { message: 'เบอร์โทรนี้ถูกใช้ไปแล้ว' } });
+      if (!canRegister) {
+        console.log("Phone number already registered");
+        Alert.alert('เบอร์โทรศัพท์นี้ถูกลงทะเบียนไปแล้ว');
         return;
       }
       
-      // ถ้าไม่มีข้อผิดพลาด ไปยังหน้าถัดไป
+      console.log("Phone check passed, navigating to next screen");
       navigation.navigate('DocumentScan', {
         phoneNumber,
         selectedProvince,
         selectedVehicleType,
+        password,
       });
     } catch (error) {
       console.error('Registration error:', error);
+      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถตรวจสอบข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsLoading(false);
     }
@@ -195,6 +207,26 @@ const BasicInfoScreen = ({ navigation }) => {
               onValueChange={setSelectedVehicleType}
               error={errors.vehicleType}
               placeholder="เลือกประเภทรถ"
+            />
+            
+            {/* New Password Input */}
+            <AuthInput
+              label="รหัสผ่าน"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="รหัสผ่าน"
+              secureTextEntry
+              error={errors.password}
+            />
+
+            {/* New Confirm Password Input */}
+            <AuthInput
+              label="ยืนยันรหัสผ่าน"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="ยืนยันรหัสผ่าน"
+              secureTextEntry
+              error={errors.confirmPassword}
             />
             
             <TouchableOpacity

@@ -1,34 +1,53 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { postRequest } from "./api";
+import { postRequest, getRequest } from "./api";
 import { API_ENDPOINTS } from "../constants";
 
 // ฟังก์ชันสำหรับการล็อกอิน
 export const login = async (phoneNumber, password) => {
-    try {
-      const response = await postRequest(API_ENDPOINTS.AUTH.LOGIN, { phone_number: phoneNumber, password });
-      
-      if (response.Status && response.token) {
-        // Extract the user data we want to store
-        const userData = {
-          driver_id: response.driver_id,
-          first_name: response.first_name,
-          last_name: response.last_name,
-          license_plate: response.license_plate,
-          phone_number: response.phone_number,
-          token: response.token
-        };
-        
-        // Save the user data to AsyncStorage
-        await AsyncStorage.setItem("user", JSON.stringify(userData));
-        return response;
-      } else {
-        throw new Error(response.Error || "เข้าสู่ระบบไม่สำเร็จ");
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      throw error;
+  try {
+    const response = await postRequest(API_ENDPOINTS.AUTH.LOGIN, { phone_number: phoneNumber, password });
+    
+    if (response?.Status && response.Message === 'บัญชีของคุณยังไม่ได้รับการอนุมัติ') {
+      return response;
     }
-  };
+    
+    if (response && response.token) {
+      // Extract the user data we want to store
+      const userData = {
+        driver_id: response.driver_id,
+        first_name: response.first_name,
+        last_name: response.last_name,
+        license_plate: response.license_plate,
+        phone_number: response.phone_number,
+        token: response.token
+      };
+      
+      // Save the user data to AsyncStorage
+      await AsyncStorage.setItem("user", JSON.stringify(userData));
+      return response;
+    } else {
+      throw new Error(response?.Error || "เข้าสู่ระบบไม่สำเร็จ");
+    }
+  } catch (error) {
+    console.error("Login error:", error);
+    
+    // ตรวจสอบว่าเป็น Axios error หรือไม่
+    if (error.isAxiosError) {
+      // ถ้าเป็น 401 แสดงว่ารหัสผ่านไม่ถูกต้อง
+      if (error.response && error.response.status === 401) {
+        // คืนค่า error แต่เพิ่มข้อมูลเพื่อให้ UI ระบุได้ว่าเป็น invalid credentials
+        return {
+          Status: false,
+          Error: "เบอร์โทรหรือรหัสผ่านไม่ถูกต้อง",
+          errorType: "invalid_credentials"
+        };
+      }
+    }
+    
+    // กรณีที่เป็น error ประเภทอื่น
+    throw error;
+  }
+};
 
 // ฟังก์ชันสำหรับการลงทะเบียน
 // ฟังก์ชันสำหรับการลงทะเบียน
@@ -87,6 +106,22 @@ export const register = async (userData) => {
     }
   } catch (error) {
     console.error("Register error:", error);
+    throw error;
+  }
+};
+
+// check phone number exists
+export const checkPhoneNumberExists = async (phone) => {
+  try {
+    const response = await getRequest(`${API_ENDPOINTS.AUTH.CHECK_PHONE}?phone_number=${phone}`);
+    console.log(response)
+    if (response?.Status && response.Message === 'ไม่พบข้อมูลการลงทะเบียน') {
+      return true;
+    }else{
+      return false;
+    }
+  } catch (error) {
+    console.error("Check phone number error:", error);
     throw error;
   }
 };

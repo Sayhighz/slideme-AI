@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import tw from 'twrnc';
@@ -29,66 +30,65 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
   const [scanning, setScanning] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
 
-  // เลือกรูปภาพจากกล้องหรือแกลเลอรี่
-  const pickImage = async (useCamera = false) => {
+  // ถ่ายรูปด้วยกล้อง - ใช้วิธีเรียบง่ายที่สุด
+  const takePicture = async () => {
     try {
-      let result;
-      
-      if (useCamera) {
-        // ขออนุญาตใช้งานกล้อง
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'ต้องการสิทธิ์การเข้าถึงกล้อง',
-            'โปรดอนุญาตให้แอปเข้าถึงกล้องเพื่อถ่ายภาพรถและป้ายทะเบียน'
-          );
-          return;
-        }
-        
-        // เปิดกล้อง
-        result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [16, 9],
-          quality: 1,
-        });
-      } else {
-        // ขออนุญาตเข้าถึงแกลเลอรี่
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'ต้องการสิทธิ์การเข้าถึงแกลเลอรี่',
-            'โปรดอนุญาตให้แอปเข้าถึงแกลเลอรี่เพื่อเลือกภาพรถและป้ายทะเบียน'
-          );
-          return;
-        }
-        
-        // เปิดแกลเลอรี่
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [16, 9],
-          quality: 1,
-        });
+      // ขออนุญาตใช้งานกล้อง
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'ต้องการสิทธิ์การเข้าถึงกล้อง',
+          'โปรดอนุญาตให้แอปเข้าถึงกล้องเพื่อถ่ายภาพรถและป้ายทะเบียน'
+        );
+        return null;
       }
+      
+      // เปิดกล้อง - ใช้พารามิเตอร์น้อยที่สุด
+      const result = await ImagePicker.launchCameraAsync({
+        quality: 0.8,
+      });
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedImage = result.assets[0];
-        setImageUri(selectedImage.uri);
-        
-        // ส่ง URI ของรูปภาพกลับไปให้ parent component
-        if (onImageSelected) {
-          onImageSelected(selectedImage.uri);
-        }
-        
-        setPreviewVisible(true);
+        const uri = result.assets[0].uri;
+        console.log('Camera image URI:', uri);
+        return uri;
       }
+      return null;
     } catch (error) {
-      console.error('Error selecting image:', error);
-      Alert.alert(
-        'ข้อผิดพลาด',
-        'เกิดข้อผิดพลาดในการเลือกรูปภาพ โปรดลองอีกครั้ง'
-      );
+      console.error('Camera error:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถใช้กล้องได้: ' + error.message);
+      return null;
+    }
+  };
+
+  // เลือกรูปจากแกลเลอรี่ - ใช้วิธีเรียบง่ายที่สุด
+  const selectPicture = async () => {
+    try {
+      // ขออนุญาตเข้าถึงแกลเลอรี่
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'ต้องการสิทธิ์การเข้าถึงแกลเลอรี่',
+          'โปรดอนุญาตให้แอปเข้าถึงแกลเลอรี่เพื่อเลือกภาพรถและป้ายทะเบียน'
+        );
+        return null;
+      }
+      
+      // เปิดแกลเลอรี่ - ใช้พารามิเตอร์น้อยที่สุด
+      const result = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.8,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        console.log('Gallery image URI:', uri);
+        return uri;
+      }
+      return null;
+    } catch (error) {
+      console.error('Gallery error:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเปิดแกลเลอรี่ได้: ' + error.message);
+      return null;
     }
   };
   
@@ -106,7 +106,16 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
     setPreviewVisible(false);
     
     try {
-      const result = await OCRService.readLicensePlate(imageUri);
+      // สร้าง timeout เพื่อป้องกันการทำงานค้าง
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('การสแกนใช้เวลานานเกินไป')), 30000)
+      );
+      
+      // ทำการสแกนพร้อมตั้งค่า timeout
+      const result = await Promise.race([
+        OCRService.readLicensePlate(imageUri),
+        timeoutPromise
+      ]);
       
       if (result.success) {
         // เรียกฟังก์ชัน callback พร้อมส่งข้อมูลที่อ่านได้
@@ -128,10 +137,19 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
       console.error('Error scanning license plate:', error);
       Alert.alert(
         'ข้อผิดพลาด',
-        'เกิดข้อผิดพลาดในการสแกนป้ายทะเบียน โปรดลองอีกครั้ง'
+        `เกิดข้อผิดพลาดในการสแกนป้ายทะเบียน: ${error.message || 'โปรดลองอีกครั้ง'}`
       );
     } finally {
       setScanning(false);
+    }
+  };
+
+  // จัดการเมื่อได้รับรูปภาพ
+  const handleImageReceived = (uri) => {
+    if (uri) {
+      setImageUri(uri);
+      if (onImageSelected) onImageSelected(uri);
+      setPreviewVisible(true);
     }
   };
 
@@ -173,10 +191,13 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
             <View style={tw`flex-row mt-3`}>
               <TouchableOpacity
                 style={tw`flex-1 py-2 mr-2 flex-row items-center justify-center bg-gray-100 rounded-lg border border-gray-300`}
-                onPress={() => pickImage(false)}
+                onPress={async () => {
+                  const uri = await selectPicture();
+                  handleImageReceived(uri);
+                }}
                 disabled={scanning}
               >
-                <Icon name="image-refresh" size={20} color={COLORS.GRAY_700} style={tw`mr-1`} />
+                <Icon name="refresh" size={20} color={COLORS.GRAY_700} style={tw`mr-1`} />
                 <Text style={{
                   fontFamily: FONTS.FAMILY.REGULAR,
                   ...tw`text-gray-700`,
@@ -210,8 +231,12 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 tw`flex-1 py-2 rounded-lg mr-2 flex-row items-center justify-center`,
                 { backgroundColor: COLORS.PRIMARY }
               ]}
-              onPress={() => pickImage(true)}
+              onPress={async () => {
+                const uri = await takePicture();
+                handleImageReceived(uri);
+              }}
               disabled={scanning}
+              activeOpacity={0.7}
             >
               <Icon name="camera" size={20} color="#fff" style={tw`mr-1`} />
               <Text style={{
@@ -227,8 +252,12 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 tw`flex-1 py-2 rounded-lg ml-2 flex-row items-center justify-center bg-gray-100`,
                 { borderWidth: 1, borderColor: COLORS.GRAY_300 }
               ]}
-              onPress={() => pickImage(false)}
+              onPress={async () => {
+                const uri = await selectPicture();
+                handleImageReceived(uri);
+              }}
               disabled={scanning}
+              activeOpacity={0.7}
             >
               <Icon name="image" size={20} color={COLORS.GRAY_700} style={tw`mr-1`} />
               <Text style={{
@@ -271,7 +300,10 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
               }}>
                 ตรวจสอบรูปภาพ
               </Text>
-              <TouchableOpacity onPress={cancelScan}>
+              <TouchableOpacity 
+                onPress={cancelScan}
+                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              >
                 <Icon name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -297,6 +329,7 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
                 <TouchableOpacity
                   style={tw`flex-1 py-3 bg-gray-200 rounded-lg mr-2 items-center`}
                   onPress={cancelScan}
+                  activeOpacity={0.7}
                 >
                   <Text style={{
                     fontFamily: FONTS.FAMILY.REGULAR,
@@ -312,6 +345,7 @@ const LicensePlateScanner = ({ onScanSuccess, onImageSelected, style }) => {
                     { backgroundColor: COLORS.PRIMARY }
                   ]}
                   onPress={scanLicensePlate}
+                  activeOpacity={0.7}
                 >
                   <Text style={{
                     fontFamily: FONTS.FAMILY.REGULAR,

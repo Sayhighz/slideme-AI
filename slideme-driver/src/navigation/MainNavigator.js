@@ -145,6 +145,10 @@ const MainNavigator = ({ userData }) => {
     try {
       const { logout } = await import('../services/auth');
       await logout();
+      if (__DEV__) {
+        const DevSettings = require('react-native').DevSettings;
+        DevSettings.reload();
+      }
       // Context API จะจัดการสถานะการล็อกอินที่ AppNavigator
     } catch (error) {
       console.error('Logout error:', error);

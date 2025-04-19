@@ -33,7 +33,8 @@ export const registerDriver = asyncHandler(async (req, res) => {
     last_name, 
     license_plate, 
     province,
-    birth_date, 
+    birth_date,
+    id_expiry_date,
     vehicletype_id
   } = req.body;
 
@@ -48,14 +49,6 @@ export const registerDriver = asyncHandler(async (req, res) => {
   if (!validatePhoneNumber(phone_number)) {
     throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_PHONE, [
       'เบอร์โทรศัพท์ไม่ถูกต้อง'
-    ]);
-  }
-
-  // Validate password strength
-  const passwordStrength = passwordService.checkPasswordStrength(password);
-  if (!passwordStrength.isStrong) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.WEAK_PASSWORD, [
-      passwordStrength.feedback
     ]);
   }
 
@@ -140,8 +133,6 @@ export const registerDriver = asyncHandler(async (req, res) => {
         }
       }
 
-      // Hash password for security
-      const hashedPassword = await passwordService.hashPassword(password);
       
       // Insert new driver
       const insertSql = `
@@ -153,22 +144,24 @@ export const registerDriver = asyncHandler(async (req, res) => {
           license_plate,
           province,
           birth_date,
+          id_expiry_date,
           vehicletype_id,
           profile_picture,
           documents,
           created_date,
           approval_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
       `;
 
       const values = [
         phone_number,
-        hashedPassword, 
+        password, 
         first_name,
         last_name,
         license_plate,
         province || "Unknown",
         birth_date || null,
+        id_expiry_date || null,
         vehicletype_id || 1, // Default vehicle type
         profilePicturePath,
         JSON.stringify(documents),
@@ -276,7 +269,42 @@ export const checkRegistrationStatus = asyncHandler(async (req, res) => {
   }
 });
 
+// checking phone number in table?
+export const checkPhoneNumber = asyncHandler (async (req, res) => {
+  const { phone_number } = req.query;
+  
+  if (!phone_number) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, [
+      "กรุณาระบุเบอร์โทรศัพท์"
+    ]);
+  }
+
+  if (!validatePhoneNumber(phone_number)) {
+    throw new ValidationError(ERROR_MESSAGES.VALIDATION.INVALID_PHONE, [
+      'เบอร์โทรศัพท์ไม่ถูกต้อง'
+    ]);
+  }
+
+  const drivers = await db.query(
+    `SELECT driver_id, approval_status, created_date 
+     FROM drivers 
+     WHERE phone_number = ?`,
+    [phone_number]
+  );
+
+  if (drivers.length === 0) {
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+    }, "ไม่พบข้อมูลการลงทะเบียน"));
+  }
+
+  if (drivers.length > 0) {
+    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
+    }, "พบข้อมูลการลงทะเบียน"));
+  }
+});
+
 export default {
   registerDriver,
-  checkRegistrationStatus
+  checkRegistrationStatus,
+  checkPhoneNumber
 };
