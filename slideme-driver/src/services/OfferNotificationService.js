@@ -62,18 +62,7 @@ TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
-    await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'มีงานใหม่สำหรับคุณ!',
-          body: `ข้อเสนอของคุณสำหรับการเดินทางจาก ${result.offer.location_from} ไป ${result.offer.location_to} ได้รับการยอมรับแล้ว`,
-          data: { 
-            type: 'offer_accepted',
-            offer_id: result.offer.offer_id,
-            request_id: result.offer.request_id
-          },
-        },
-        trigger: null, // แสดงทันที
-      });
+    
     
     const user = JSON.parse(userData);
     debug(`Checking offers for driver ${user.driver_id} in background`);

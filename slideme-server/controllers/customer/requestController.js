@@ -1055,80 +1055,7 @@ export const completeRequest = asyncHandler(async (req, res) => {
     }
   });
 
-  // Add this endpoint to slideme-server/controllers/driver/requestController.js
-
-/**
- * Update service request status
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export const updateServiceStatus = asyncHandler(async (req, res) => {
-  const { request_id, driver_id, status } = req.body;
-
-  // Validate input
-  if (!request_id || !driver_id || !status) {
-    throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id', 'status']);
-  }
-
-  // Valid status values
-  const validStatuses = ['accepted', 'pickup_in_progress', 'pickup_completed', 'dropoff_in_progress', 'completed', 'cancelled'];
-  if (!validStatuses.includes(status)) {
-    throw new ValidationError('สถานะไม่ถูกต้อง', [`สถานะต้องเป็นหนึ่งใน: ${validStatuses.join(', ')}`]);
-  }
-
-  try {
-    const db = (await import('../../config/db.js')).default;
-    
-    // Check if the request exists and belongs to this driver (via offer)
-    const requestExists = await db.query(
-      `SELECT sr.request_id, sr.status, do.driver_id
-       FROM servicerequests sr
-       LEFT JOIN driveroffers do ON sr.offer_id = do.offer_id
-       WHERE sr.request_id = ? AND do.driver_id = ?`,
-      [request_id, driver_id]
-    );
-
-    if (requestExists.length === 0) {
-      throw new NotFoundError('ไม่พบข้อมูลการร้องขอบริการนี้ หรือไม่มีสิทธิ์ในการอัปเดตข้อมูล');
-    }
-
-    // Update the status
-    await db.query(
-      `UPDATE servicerequests 
-       SET status = ?, 
-           updated_at = NOW() 
-       WHERE request_id = ?`,
-      [status, request_id]
-    );
-
-    // Create a log entry for this status change
-    await db.query(
-      `INSERT INTO service_status_logs (request_id, driver_id, status, created_at)
-       VALUES (?, ?, ?, NOW())`,
-      [request_id, driver_id, status]
-    );
-
-    logger.info(`Service request status updated to ${status}`, { 
-      request_id,
-      driver_id,
-      status
-    });
-
-    return res.status(STATUS_CODES.OK).json(formatSuccessResponse({
-      request_id,
-      status
-    }, 'อัปเดตสถานะการให้บริการสำเร็จ'));
-  } catch (error) {
-    logger.error('Error updating service request status', { 
-      request_id,
-      driver_id,
-      status,
-      error: error.message 
-    });
-    
-    throw new CustomError('เกิดข้อผิดพลาดในการอัปเดตสถานะ', STATUS_CODES.INTERNAL_SERVER_ERROR);
-  }
-});
+  
 
 export default {
   createRequest,
@@ -1138,6 +1065,5 @@ export default {
   cancelRequest,
   getDriverOffers,
   acceptOffer,
-  completeRequest,
-  updateServiceStatus
+  completeRequest
 };

@@ -1,3 +1,4 @@
+// src/screens/auth/RegisterPersonalInfoScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView,
@@ -14,13 +15,13 @@ import * as Animatable from 'react-native-animatable';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
-import { th } from 'date-fns/locale';
 
 // Import components
 import AuthHeader from '../../components/auth/AuthHeader';
 import AuthInput from '../../components/auth/AuthInput';
 import AuthButton from '../../components/auth/AuthButton';
 import RegistrationSteps from '../../components/auth/RegistrationSteps';
+import ThaiIDCardScanner from '../../components/auth/ThaiIDCardScanner';
 
 // Import services and constants
 import { FONTS, COLORS, MESSAGES } from '../../constants';
@@ -148,6 +149,24 @@ const RegisterPersonalInfoScreen = ({ navigation, route }) => {
     }
   };
 
+  // จัดการข้อมูลที่ได้จากการสแกนบัตรประชาชน
+  const handleIDCardScanSuccess = (data) => {
+    console.log('ID Card Scan Success:', data);
+    
+    // กรอกข้อมูลจากบัตรประชาชนลงในฟอร์ม
+    setFirstName(data.firstName || '');
+    setLastName(data.lastName || '');
+    setIdNumber(data.idNumber || '');
+    setBirthDate(data.birthDate || '');
+    setIdExpiryDate(data.expireDate || '');
+    
+    // แสดงการแจ้งเตือนว่ากรอกข้อมูลสำเร็จ
+    Alert.alert(
+      'สแกนสำเร็จ',
+      'ระบบกรอกข้อมูลจากบัตรประชาชนให้อัตโนมัติแล้ว โปรดตรวจสอบความถูกต้อง'
+    );
+  };
+
   const handleNext = () => {
     if (!validateForm()) return;
     
@@ -197,6 +216,12 @@ const RegisterPersonalInfoScreen = ({ navigation, route }) => {
           contentContainerStyle={tw`p-6`}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Thai ID Card Scanner Component */}
+          <ThaiIDCardScanner 
+            onScanSuccess={handleIDCardScanSuccess}
+            style={tw`mb-6`}
+          />
+          
           <Animatable.View animation="fadeInUp" duration={600} delay={200}>
             <View style={tw`mb-6`}>
               <View style={{

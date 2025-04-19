@@ -1,3 +1,4 @@
+// src/screens/auth/RegisterUploadScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView,
@@ -6,7 +7,8 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  StyleSheet
+  StyleSheet,
+  Image
 } from 'react-native';
 import tw from 'twrnc';
 import * as ImagePicker from 'expo-image-picker';
@@ -28,8 +30,8 @@ const RegisterUploadScreen = ({ navigation, route }) => {
   
   const [documents, setDocuments] = useState({
     profilePhoto: null,
-    driverLicense: null,
-    vehicleWithPlate: null,
+    driverLicense: routeParams.documents?.driverLicense || null,
+    vehicleWithPlate: routeParams.documents?.vehicleWithPlate || null,
     vehicleRegistration: null,
     idCard: null,
     bankBook: null,
@@ -63,6 +65,17 @@ const RegisterUploadScreen = ({ navigation, route }) => {
     requestPermission();
   }, []);
 
+  // แสดงข้อความเมื่อมีรูปถ่ายที่สแกนมาแล้ว
+  useEffect(() => {
+    if (routeParams.documents?.driverLicense || routeParams.documents?.vehicleWithPlate) {
+      Toast.show({
+        type: 'success',
+        text1: 'นำเข้ารูปภาพสำเร็จ',
+        text2: 'รูปภาพที่สแกนได้ถูกนำเข้าระบบแล้ว',
+      });
+    }
+  }, [routeParams.documents]);
+
   // ฟังก์ชันคำนวณความคืบหน้าของการอัปโหลด
   const calculateUploadProgress = () => {
     const requiredDocs = ['driverLicense', 'vehicleWithPlate', 'vehicleRegistration', 'idCard'];
@@ -72,6 +85,24 @@ const RegisterUploadScreen = ({ navigation, route }) => {
 
   // ฟังก์ชันเลือกรูปภาพจากคลังรูปภาพ
   const handleSelectImage = async (docType) => {
+    // ถ้าเป็นเอกสารที่มีรูปอยู่แล้วจากการสแกน ให้แสดงแจ้งเตือนก่อน
+    if ((docType === 'driverLicense' || docType === 'vehicleWithPlate') && documents[docType]) {
+      Alert.alert(
+        "คุณต้องการเปลี่ยนรูปภาพหรือไม่?",
+        "คุณมีรูปภาพที่สแกนไว้แล้ว ต้องการเปลี่ยนเป็นรูปใหม่หรือไม่?",
+        [
+          { text: "ยกเลิก", style: "cancel" },
+          { text: "เปลี่ยน", onPress: () => selectImageFromGallery(docType) }
+        ]
+      );
+      return;
+    }
+    
+    // เลือกรูปภาพตามปกติ
+    selectImageFromGallery(docType);
+  };
+
+  const selectImageFromGallery = async (docType) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -111,7 +142,7 @@ const RegisterUploadScreen = ({ navigation, route }) => {
     setProcessingOCR(prev => ({ ...prev, driverLicense: true }));
     
     try {
-      const result = await OCRService.readDriverLicense(imageUri);
+      const result = await OCRService.readThaiDriverLicense(imageUri);
       
       if (result.success) {
         setOcrData(prev => ({ ...prev, driverLicense: result.data }));
@@ -209,17 +240,12 @@ const RegisterUploadScreen = ({ navigation, route }) => {
       
       // ถ้ามีการอ่านข้อมูลจาก OCR สำเร็จ ให้เพิ่มข้อมูลเหล่านั้นด้วย
       if (ocrData.driverLicense) {
-        combinedData.firstName = combinedData.firstName || ocrData.driverLicense.firstName;
-        combinedData.lastName = combinedData.lastName || ocrData.driverLicense.lastName;
-        combinedData.idNumber = combinedData.idNumber || ocrData.driverLicense.idNumber;
-        combinedData.birthDate = combinedData.birthDate || ocrData.driverLicense.birthDate;
-        combinedData.idExpiryDate = combinedData.idExpiryDate || ocrData.driverLicense.expiryDate;
+        combinedData.licenseNumber = combinedData.licenseNumber || ocrData.driverLicense.licenseNumber;
       }
       
       if (ocrData.vehicleWithPlate) {
         combinedData.licensePlate = combinedData.licensePlate || ocrData.vehicleWithPlate.licensePlate;
-        combinedData.selectedProvince = combinedData.selectedProvince || ocrData.vehicleWithPlate.province;
-        combinedData.vehicleType = combinedData.vehicleType || ocrData.vehicleWithPlate.vehicleType;
+        combinedData.vehicleProvince = combinedData.vehicleProvince || ocrData.vehicleWithPlate.province;
       }
       
       // นำทางไปยังหน้าถัดไป
@@ -230,6 +256,17 @@ const RegisterUploadScreen = ({ navigation, route }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // สร้างคำอธิบายสำหรับเอกสารที่มีการสแกนมาแล้ว
+  const getDocumentDescription = (docType) => {
+    if (docType === 'driverLicense' && routeParams.documents?.driverLicense) {
+      return "อัปโหลดจากการสแกนใบขับขี่แล้ว";
+    } else if (docType === 'vehicleWithPlate' && routeParams.documents?.vehicleWithPlate) {
+      return "อัปโหลดจากการสแกนป้ายทะเบียนแล้ว";
+    }
+    
+    return undefined;  // ใช้ค่า default
   };
 
   return (
@@ -321,7 +358,7 @@ const RegisterUploadScreen = ({ navigation, route }) => {
           imageUri={documents.driverLicense}
           onPress={() => handleSelectImage('driverLicense')}
           isProcessing={processingOCR.driverLicense}
-          description={ocrData.driverLicense ? "ระบบได้อ่านข้อมูลจากใบขับขี่เรียบร้อยแล้ว" : "ระบบจะอ่านข้อมูลจากใบขับขี่อัตโนมัติ"}
+          description={getDocumentDescription('driverLicense') || (ocrData.driverLicense ? "ระบบได้อ่านข้อมูลจากใบขับขี่เรียบร้อยแล้ว" : "ระบบจะอ่านข้อมูลจากใบขับขี่อัตโนมัติ")}
         />
         
         <Text style={{
@@ -340,7 +377,7 @@ const RegisterUploadScreen = ({ navigation, route }) => {
           imageUri={documents.vehicleWithPlate}
           onPress={() => handleSelectImage('vehicleWithPlate')}
           isProcessing={processingOCR.vehicleWithPlate}
-          description={ocrData.vehicleWithPlate ? `ทะเบียน: ${ocrData.vehicleWithPlate.licensePlate}` : "ระบบจะอ่านป้ายทะเบียนอัตโนมัติ"}
+          description={getDocumentDescription('vehicleWithPlate') || (ocrData.vehicleWithPlate ? `ทะเบียน: ${ocrData.vehicleWithPlate.licensePlate}` : "ระบบจะอ่านป้ายทะเบียนอัตโนมัติ")}
         />
         
         {/* Vehicle Registration */}
@@ -384,31 +421,5 @@ const RegisterUploadScreen = ({ navigation, route }) => {
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  progressContainer: {
-    marginBottom: 24,
-  },
-  progressBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progress: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  sectionTitle: {
-    fontWeight: '600',
-    marginTop: 24,
-    marginBottom: 16,
-  },
-});
 
 export default RegisterUploadScreen;

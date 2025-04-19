@@ -17,12 +17,9 @@ export const getDriverById = async (driverId) => {
       `SELECT 
          d.driver_id, 
          d.phone_number, 
-         d.email, 
-         d.username,
          d.first_name, 
          d.last_name, 
          d.license_plate,
-         d.license_number,
          d.id_expiry_date,
          d.province,
          d.vehicletype_id,
@@ -58,13 +55,10 @@ export const getDriverByPhone = async (phoneNumber) => {
     const drivers = await db.query(
       `SELECT 
          d.driver_id, 
-         d.phone_number, 
-         d.email, 
-         d.username,
+         d.phone_number,  
          d.first_name, 
          d.last_name, 
          d.license_plate,
-         d.license_number,
          d.id_expiry_date,
          d.province,
          d.vehicletype_id,
@@ -142,12 +136,9 @@ export const createDriver = async (driverData) => {
     const result = await db.query(
       `INSERT INTO drivers (
          phone_number, 
-         email, 
-         username,
          first_name, 
          last_name,
          license_plate,
-         license_number,
          id_expiry_date,
          province,
          vehicletype_id,
@@ -158,12 +149,9 @@ export const createDriver = async (driverData) => {
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
       [
         driverData.phone_number,
-        driverData.email || null,
-        driverData.username || null,
         driverData.first_name || null,
         driverData.last_name || null,
         driverData.license_plate || null,
-        driverData.license_number || null,
         driverData.id_expiry_date || null,
         driverData.province || 'Unknown',
         driverData.vehicletype_id || 99, // Default vehicle type
@@ -211,7 +199,6 @@ export const updateDriver = async (driverId, driverData) => {
     const result = await db.query(
       `UPDATE drivers
        SET 
-         email = ?,
          username = ?,
          first_name = ?,
          last_name = ?,
@@ -221,8 +208,6 @@ export const updateDriver = async (driverId, driverData) => {
          birth_date = ?
        WHERE driver_id = ?`,
       [
-        driverData.email || existingDriver.email,
-        driverData.username || existingDriver.username,
         driverData.first_name || existingDriver.first_name,
         driverData.last_name || existingDriver.last_name,
         driverData.id_expiry_date || existingDriver.id_expiry_date,
