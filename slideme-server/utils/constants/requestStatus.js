@@ -8,6 +8,7 @@
 export const REQUEST_STATUS = {
     PENDING: 'pending',    // New request, waiting for driver offers
     ACCEPTED: 'accepted',  // Driver offer accepted, service in progress
+    DROPOFF: 'delivery_in_progress',    // Driver at dropoff, waiting for customer confirmation
     COMPLETED: 'completed', // Service successfully completed
     CANCELLED: 'cancelled'  // Service cancelled by customer or system
   };

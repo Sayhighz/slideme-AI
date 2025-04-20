@@ -348,11 +348,7 @@ export const getActiveRequests = asyncHandler(async (req, res) => {
   }));
 });
 
-/**
- * Update request status to completed
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
+
 /**
  * Complete a service request
  * @param {Object} req - Express request object
@@ -365,7 +361,47 @@ export const completeRequest = asyncHandler(async (req, res) => {
     throw new ValidationError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD, ['request_id', 'driver_id']);
   }
 
-  // Check if the request exists, belongs to the driver through an offer, and is in accepted status
+  // ตรวจสอบประเภทข้อมูล
+  console.log("request_id type:", typeof request_id, "value:", JSON.stringify(request_id));
+  console.log("driver_id type:", typeof driver_id, "value:", JSON.stringify(driver_id));
+
+  // ทดสอบการเชื่อมต่อฐานข้อมูล
+  const connectionTest = await db.query('SELECT 1 as test');
+  console.log("Database connection test:", connectionTest);
+
+  // ตรวจสอบข้อมูลรายการในแต่ละตาราง
+  const requestInfo = await db.query(`SELECT * FROM servicerequests WHERE request_id = ?`, [request_id]);
+  console.log("Request info:", requestInfo.length > 0 ? requestInfo[0] : "Not found");
+
+  if (requestInfo.length === 0) {
+    return res.status(404).json({
+      Status: false,
+      Error: "ไม่พบข้อมูลคำขอบริการที่ระบุ"
+    });
+  }
+
+  // ตรวจสอบข้อมูล driver
+  const driverOfferInfo = await db.query(`
+    SELECT * FROM driveroffers 
+    WHERE request_id = ? AND driver_id = ?
+  `, [request_id, driver_id]);
+  console.log("Driver offer info:", driverOfferInfo.length > 0 ? driverOfferInfo[0] : "Not found");
+
+  if (driverOfferInfo.length === 0) {
+    return res.status(404).json({
+      Status: false,
+      Error: "ไม่พบข้อมูลการเสนอราคาของคนขับสำหรับคำขอนี้"
+    });
+  }
+
+  // ตรวจสอบสถานะปัจจุบัน
+  console.log("Current request status:", requestInfo[0].status);
+  
+  // อัปเดตเงื่อนไขการค้นหาให้รองรับสถานะหลายแบบ
+  const allowedStatuses = ['delivery_in_progress', 'at_dropoff', 'accepted'];
+  const statusCondition = allowedStatuses.map(() => 'r.status = ?').join(' OR ');
+
+  // Check if the request exists, belongs to the driver through an offer, and is in valid status
   const checkSql = `
     SELECT r.request_id, r.status, r.customer_id, o.driver_id, o.offer_id, o.offered_price, r.payment_id, 
            r.location_from, r.location_to, v.vehicletype_name,
@@ -376,13 +412,78 @@ export const completeRequest = asyncHandler(async (req, res) => {
     JOIN vehicle_types v ON r.vehicletype_id = v.vehicletype_id
     JOIN payments p ON r.payment_id = p.payment_id
     JOIN paymentmethod pm ON p.payment_method_id = pm.payment_method_id
-    WHERE r.request_id = ? AND o.driver_id = ? AND r.status = ?
+    WHERE r.request_id = ? AND o.driver_id = ? AND (${statusCondition})
   `;
 
-  const checkResult = await db.query(checkSql, [request_id, driver_id, REQUEST_STATUS.ACCEPTED]);
+  const params = [request_id, driver_id, ...allowedStatuses];
+  console.log("SQL query:", checkSql);
+  console.log("Query parameters:", params);
 
+  // สร้าง SQL ที่ประกอบพารามิเตอร์แล้ว เพื่อการตรวจสอบ (เฉพาะ debug)
+  const debugSql = checkSql.replace(/\?/g, (match, offset, string) => {
+    return `'${params.shift()}'`;
+  });
+  console.log("Constructed SQL for debugging:", debugSql);
+
+  const checkResult = await db.query(checkSql, [request_id, driver_id, ...allowedStatuses]);
+  
+  console.log("Query result length:", checkResult.length);
+  console.log("Full query result:", JSON.stringify(checkResult, null, 2));
+
+  // ถ้ายังไม่พบข้อมูล ลองใช้ query แบบง่ายขึ้น
   if (checkResult.length === 0) {
-    throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้นหรือคำขอไม่ได้มอบหมายให้คนขับนี้");
+    console.log("No results with complex query, trying simplified query...");
+    
+    const simplifiedSql = `
+      SELECT r.request_id, r.status, r.customer_id, o.driver_id, o.offer_id, r.payment_id
+      FROM servicerequests r
+      JOIN driveroffers o ON r.request_id = o.request_id
+      WHERE r.request_id = ? AND o.driver_id = ?
+    `;
+    
+    const simplifiedResult = await db.query(simplifiedSql, [request_id, driver_id]);
+    console.log("Simplified query result:", simplifiedResult);
+    
+    if (simplifiedResult.length > 0) {
+      // ใช้ข้อมูลจาก simplified query
+      console.log("Using data from simplified query");
+      
+      // ดึงข้อมูลเพิ่มเติมที่จำเป็น
+      const vehicleTypeQuery = await db.query(
+        "SELECT vehicletype_name FROM vehicle_types WHERE vehicletype_id = ?", 
+        [requestInfo[0].vehicletype_id]
+      );
+      
+      const paymentMethodQuery = await db.query(
+        "SELECT method_name FROM paymentmethod pm JOIN payments p ON pm.payment_method_id = p.payment_method_id WHERE p.payment_id = ?", 
+        [requestInfo[0].payment_id]
+      );
+      
+      // สร้างข้อมูลเพื่อใช้ต่อ
+      checkResult.push({
+        request_id: simplifiedResult[0].request_id,
+        status: simplifiedResult[0].status,
+        customer_id: simplifiedResult[0].customer_id,
+        driver_id: simplifiedResult[0].driver_id,
+        offer_id: simplifiedResult[0].offer_id,
+        offered_price: driverOfferInfo[0].offered_price,
+        payment_id: simplifiedResult[0].payment_id,
+        location_from: requestInfo[0].location_from,
+        location_to: requestInfo[0].location_to,
+        vehicletype_name: vehicleTypeQuery.length > 0 ? vehicleTypeQuery[0].vehicletype_name : "Unknown",
+        pickup_lat: requestInfo[0].pickup_lat,
+        pickup_long: requestInfo[0].pickup_long,
+        dropoff_lat: requestInfo[0].dropoff_lat,
+        dropoff_long: requestInfo[0].dropoff_long,
+        method_name: paymentMethodQuery.length > 0 ? paymentMethodQuery[0].method_name : "Unknown"
+      });
+    } else {
+      console.log("Error: No matching request found with any query");
+      return res.status(404).json({
+        Status: false,
+        Error: "ไม่พบคำขอบริการที่ต้องการเสร็จสิ้นหรือคำขอไม่ได้มอบหมายให้คนขับนี้"
+      });
+    }
   }
 
   const { customer_id, offer_id, offered_price, payment_id, location_from, location_to, 
@@ -394,6 +495,13 @@ export const completeRequest = asyncHandler(async (req, res) => {
     pickup_lat, pickup_long, dropoff_lat, dropoff_long
   );
   const travelTime = distanceService.calculateTravelTime(tripDistance);
+
+  console.log("Proceeding with data:", {
+    customer_id, driver_id, offer_id, payment_id,
+    price: offered_price,
+    distance: tripDistance,
+    time: travelTime
+  });
 
   // Start a database transaction
   const connection = await db.beginTransaction();
@@ -514,6 +622,7 @@ export const completeRequest = asyncHandler(async (req, res) => {
     );
   } catch (error) {
     await db.rollbackTransaction(connection);
+    logger.error("Transaction error:", error);
     throw error;
   }
 });

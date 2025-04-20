@@ -106,34 +106,67 @@ export default function JobWorkingDropoffScreen({ route }) {
   // Complete request and finish the job
   const completeRequest = async () => {
     try {
+      // ตรวจสอบว่ามีข้อมูลที่จำเป็นครบถ้วน
+      if (!request_id || !userData?.driver_id) {
+        console.error("Missing required data:", { request_id, driver_id: userData?.driver_id });
+        Alert.alert("ข้อผิดพลาด", "ไม่พบข้อมูลที่จำเป็นสำหรับการจบงาน");
+        return;
+      }
+  
+      // บันทึก log เพื่อตรวจสอบข้อมูลที่จะส่ง
+      console.log("Completing request with data:", {
+        request_id,
+        driver_id: userData.driver_id
+      });
+  
       // First update status to 'completed'
-      await postRequest(API_ENDPOINTS.JOBS.UPDATE_STATUS, {
+      const updateResponse = await postRequest(API_ENDPOINTS.JOBS.UPDATE_STATUS, {
         request_id,
         driver_id: userData.driver_id,
         status: 'completed'
       });
+  
+      console.log("Update status response:", updateResponse);
+      
+      if (!updateResponse || !updateResponse.Status) {
+        throw new Error(updateResponse?.Error || "ไม่สามารถอัปเดตสถานะได้");
+      }
       
       // Then call the complete_request endpoint
+      console.log(request)
       const response = await postRequest(
         API_ENDPOINTS.JOBS.COMPLETE_REQUEST,
         {
           request_id: request_id,
-          driver_id: userData?.driver_id
+          driver_id: userData.driver_id
         }
       );
-
+      
+      console.log("Complete request response:", response);
+  
       if (response && response.Status) {
         Alert.alert(
           "สำเร็จ", 
           MESSAGES.SUCCESS.COMPLETE, 
           [{ text: "ตกลง", onPress: () => navigation.navigate("HomeMain") }]
         );
+        if (__DEV__) {
+          const DevSettings = require('react-native').DevSettings;
+          DevSettings.reload();
+        }
       } else {
-        Alert.alert("ข้อผิดพลาด", response.message || "ไม่สามารถจบงานได้");
+        // แสดงข้อความข้อผิดพลาดที่ได้รับจาก API หรือข้อความเริ่มต้น
+        Alert.alert("ข้อผิดพลาด", response?.Error || "ไม่สามารถจบงานได้");
       }
     } catch (error) {
-      Alert.alert("ข้อผิดพลาด", MESSAGES.ERRORS.CONNECTION);
       console.error("Error completing request:", error);
+      
+      // แสดงข้อความข้อผิดพลาดที่เฉพาะเจาะจงจาก response หากมี
+      const errorMessage = error.response?.data?.Error || 
+                           error.message || 
+                           MESSAGES.ERRORS.CONNECTION;
+      
+      Alert.alert("ข้อผิดพลาด", errorMessage);
     }
   };
 

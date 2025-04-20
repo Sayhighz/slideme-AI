@@ -118,19 +118,6 @@ const VerificationStatusScreen = ({ navigation, route }) => {
   };
   
   // ไปยังหน้าสร้างรหัสผ่าน (กรณีได้รับการอนุมัติแล้ว)
-  const goToCreatePassword = () => {
-    if (status === 'approved') {
-      navigation.navigate('CreatePassword', { 
-        driverId,
-        phoneNumber
-      });
-    } else {
-      Alert.alert(
-        'ยังไม่ได้รับการอนุมัติ',
-        'การสมัครของคุณอยู่ระหว่างการตรวจสอบ กรุณารอการอนุมัติก่อนสร้างรหัสผ่าน'
-      );
-    }
-  };
   
   // ออกจากการลงทะเบียนกลับไปหน้าล็อกอิน
   const exitRegistration = () => {

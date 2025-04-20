@@ -967,7 +967,7 @@ export const completeRequest = asyncHandler(async (req, res) => {
       WHERE r.request_id = ? AND r.customer_id = ? AND r.status = ?
     `;
   
-    const checkResult = await db.query(checkSql, [request_id, customer_id, REQUEST_STATUS.ACCEPTED]);
+    const checkResult = await db.query(checkSql, [request_id, customer_id, REQUEST_STATUS.DROPOFF]);
   
     if (checkResult.length === 0) {
       throw new NotFoundError("ไม่พบคำขอบริการที่ต้องการเสร็จสิ้น");
